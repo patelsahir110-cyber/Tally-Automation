@@ -3105,8 +3105,8 @@ class DestockHandler(SimpleHTTPRequestHandler):
 
 def main() -> None:
     init_db()
-    port = int(os.environ.get("DESTOCK_PORT", "4173"))
-    server = ThreadingHTTPServer(("127.0.0.1", port), DestockHandler)
+    port = int(os.environ.get("PORT", os.environ.get("DESTOCK_PORT", "4173")))
+    server = ThreadingHTTPServer(("0.0.0.0", port), DestockHandler)
     print(f"Destock running at http://127.0.0.1:{port}")
     try:
         server.serve_forever()
