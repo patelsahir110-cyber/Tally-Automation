@@ -1,0 +1,356 @@
+<!doctype html>
+<html class="light" lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tally Automation - Institutional Financial Intelligence Suite</title>
+    
+    <!-- Bespoke Google Fonts: Plus Jakarta Sans, Inter, JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#1e3a8a",
+                        "primary-container": "#1d4ed8",
+                        "primary-fixed": "#dbeafe",
+                        "primary-fixed-dim": "#bfdbfe",
+                        "on-primary": "#ffffff",
+                        "on-primary-container": "#eff6ff",
+                        "secondary": "#0284c7",
+                        "secondary-container": "#38bdf8",
+                        "secondary-fixed": "#e0f2fe",
+                        "secondary-fixed-dim": "#bae6fd",
+                        "on-secondary": "#ffffff",
+                        "tertiary": "#0f172a",
+                        "tertiary-container": "#334155",
+                        "tertiary-fixed": "#f1f5f9",
+                        "tertiary-fixed-dim": "#cbd5e1",
+                        "on-tertiary": "#ffffff",
+                        "surface": "#ffffff",
+                        "surface-bright": "#ffffff",
+                        "surface-dim": "#f1f5f9",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-low": "#f8fafc",
+                        "surface-container": "#f1f5f9",
+                        "surface-container-high": "#e2e8f0",
+                        "surface-container-highest": "#cbd5e1",
+                        "surface-variant": "#f1f5f9",
+                        "on-surface": "#0f172a",
+                        "on-surface-variant": "#475569",
+                        "outline": "#64748b",
+                        "outline-variant": "#e2e8f0",
+                        "background": "#f4f7fb",
+                        "on-background": "#0f172a",
+                        "error": "#b91c1c",
+                        "error-container": "#fee2e2",
+                        "on-error": "#ffffff",
+                        "on-error-container": "#7f1d1d"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.375rem",
+                        "lg": "0.625rem",
+                        "xl": "0.875rem",
+                        "2xl": "1.25rem",
+                        "3xl": "1.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "sidebar-width": "260px",
+                        "margin-page": "32px",
+                        "side-panel-width": "340px",
+                        "base": "4px",
+                        "gutter": "24px",
+                        "section-gap": "40px"
+                    },
+                    "fontFamily": {
+                        "display": ["'Plus Jakarta Sans'", "sans-serif"],
+                        "display-lg": ["'Plus Jakarta Sans'", "sans-serif"],
+                        "headline-md": ["'Plus Jakarta Sans'", "sans-serif"],
+                        "headline-sm": ["'Plus Jakarta Sans'", "sans-serif"],
+                        "body-md": ["'Inter'", "sans-serif"],
+                        "body-lg": ["'Inter'", "sans-serif"],
+                        "label-caps": ["'Inter'", "sans-serif"],
+                        "data-mono": ["'JetBrains Mono'", "monospace"],
+                        "mono": ["'JetBrains Mono'", "monospace"],
+                        "sans": ["'Inter'", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "body-md": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "label-caps": ["11px", {"lineHeight": "1.2", "letterSpacing": "0.08em", "fontWeight": "700"}],
+                        "data-mono": ["13px", {"lineHeight": "1.0", "fontWeight": "500"}],
+                        "headline-md": ["24px", {"lineHeight": "1.25", "fontWeight": "700"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "headline-sm": ["18px", {"lineHeight": "1.35", "fontWeight": "700"}],
+                        "display-lg": ["36px", {"lineHeight": "1.15", "letterSpacing": "-0.03em", "fontWeight": "800"}]
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        /* Ambient Radial Mesh Canvas Background */
+        body {
+            background-color: #F4F7FB !important;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(37, 99, 235, 0.05) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.04) 0px, transparent 50%),
+                radial-gradient(at 50% 100%, rgba(30, 58, 138, 0.03) 0px, transparent 60%) !important;
+            color: #0F172A;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+        }
+
+        /* Precision-milled Frosted Glass Cards */
+        .glass-card, .glass-pro {
+            background: rgba(255, 255, 255, 0.94) !important;
+            backdrop-filter: blur(12px) !important;
+            -webkit-backdrop-filter: blur(12px) !important;
+            border: 1px solid rgba(15, 23, 42, 0.07) !important;
+            box-shadow: 
+                inset 0 1px 0 0 rgba(255, 255, 255, 1),
+                0 1px 2px 0 rgba(15, 23, 42, 0.03),
+                0 8px 24px -4px rgba(15, 23, 42, 0.05),
+                0 20px 40px -12px rgba(30, 58, 138, 0.04) !important;
+            transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+        }
+
+        .glass-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(37, 99, 235, 0.25) !important;
+            box-shadow: 
+                inset 0 1px 0 0 rgba(255, 255, 255, 1),
+                0 4px 12px 0 rgba(15, 23, 42, 0.05),
+                0 12px 32px -4px rgba(30, 58, 138, 0.08),
+                0 24px 48px -12px rgba(30, 58, 138, 0.06) !important;
+        }
+
+        /* Deep Obsidian-Sapphire Primary Page Titles */
+        .page-headline-gradient, h2.text-display-lg {
+            background: linear-gradient(135deg, #0B192C 0%, #1E3A8A 55%, #2563EB 100%) !important;
+            -webkit-background-clip: text !important;
+            -webkit-text-fill-color: transparent !important;
+            letter-spacing: -0.03em !important;
+            font-weight: 800 !important;
+            font-family: 'Plus Jakarta Sans', sans-serif !important;
+        }
+
+        /* Commanding Primary Action Buttons */
+        .btn.primary, button.bg-primary, .glow-button, #continue-btn {
+            background: linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 55%, #2563EB 100%) !important;
+            border: 1px solid rgba(30, 58, 138, 0.8) !important;
+            box-shadow: 
+                inset 0 1px 0 0 rgba(255, 255, 255, 0.25),
+                0 2px 4px rgba(15, 23, 42, 0.12),
+                0 6px 16px -2px rgba(29, 78, 216, 0.32) !important;
+            color: #ffffff !important;
+            font-weight: 700 !important;
+            transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+        }
+
+        .btn.primary:hover, button.bg-primary:hover, .glow-button:hover, #continue-btn:hover {
+            background: linear-gradient(135deg, #1E40AF 0%, #2563EB 55%, #3B82F6 100%) !important;
+            box-shadow: 
+                inset 0 1px 0 0 rgba(255, 255, 255, 0.35),
+                0 4px 8px rgba(15, 23, 42, 0.14),
+                0 8px 20px -2px rgba(37, 99, 235, 0.42) !important;
+            transform: translateY(-1px) !important;
+        }
+
+        .btn.primary:active, button.bg-primary:active, .glow-button:active, #continue-btn:active {
+            transform: translateY(0px) !important;
+        }
+
+        /* Secondary Outlined Buttons & Surface Pills */
+        .btn:not(.primary):not(.danger), button.bg-white {
+            background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%) !important;
+            border: 1px solid #CBD5E1 !important;
+            box-shadow: inset 0 1px 0 0 #FFFFFF, 0 1px 2px 0 rgba(15, 23, 42, 0.03) !important;
+            color: #0F172A !important;
+            font-weight: 600 !important;
+            transition: all 180ms ease !important;
+        }
+
+        .btn:not(.primary):not(.danger):hover, button.bg-white:hover {
+            background: #F1F5F9 !important;
+            border-color: #94A3B8 !important;
+            color: #0F172A !important;
+        }
+
+        /* Financial Numerals & Codes Monospace */
+        .font-data-mono, .amount, .tabular-nums, code, [data-col="date"], [data-col="invoice no"], [data-col="rate"], [data-col="quantity"], [data-col="taxable amount"], [data-col="total amount"], [data-col="CGST"], [data-col="SGST"], [data-col="IGST"], [data-col="gstin/uin"] {
+            font-family: 'JetBrains Mono', monospace !important;
+            font-variant-numeric: tabular-nums !important;
+        }
+
+        /* Semantic Badges */
+        .bg-emerald-50, .bg-green-50 {
+            background: rgba(16, 185, 129, 0.10) !important;
+            border: 1px solid rgba(16, 185, 129, 0.28) !important;
+            color: #047857 !important;
+            font-size: 10.5px !important;
+            letter-spacing: 0.06em !important;
+            font-weight: 700 !important;
+        }
+
+        .bg-emerald-500, .bg-green-500 {
+            box-shadow: 0 0 6px rgba(16, 185, 129, 0.5) !important;
+        }
+
+        .bg-amber-50 {
+            background: rgba(245, 158, 11, 0.10) !important;
+            border: 1px solid rgba(245, 158, 11, 0.30) !important;
+            color: #B45309 !important;
+            font-size: 10.5px !important;
+            letter-spacing: 0.06em !important;
+            font-weight: 700 !important;
+        }
+
+        .bg-red-50, .bg-error\/10 {
+            background: rgba(239, 68, 68, 0.09) !important;
+            border: 1px solid rgba(239, 68, 68, 0.25) !important;
+            color: #B91C1C !important;
+            font-size: 10.5px !important;
+            letter-spacing: 0.06em !important;
+            font-weight: 700 !important;
+        }
+
+        /* Signature Accent Borders */
+        .border-b-primary {
+            border-bottom: 4px solid transparent !important;
+            border-image: linear-gradient(90deg, #0F172A 0%, #1E40AF 50%, #2563EB 100%) 1 !important;
+        }
+
+        .border-b-secondary {
+            border-bottom: 4px solid transparent !important;
+            border-image: linear-gradient(90deg, #1E3A8A 0%, #2563EB 60%, #38BDF8 100%) 1 !important;
+        }
+
+        .border-b-tertiary {
+            border-bottom: 4px solid transparent !important;
+            border-image: linear-gradient(90deg, #0F172A 0%, #334155 50%, #64748B 100%) 1 !important;
+        }
+
+        .border-b-outline {
+            border-bottom: 4px solid transparent !important;
+            border-image: linear-gradient(90deg, #1E40AF 0%, #3B82F6 50%, #93C5FD 100%) 1 !important;
+        }
+
+        .border-l-primary {
+            border-left: 4px solid transparent !important;
+            border-image: linear-gradient(180deg, #1E3A8A 0%, #2563EB 60%, #38BDF8 100%) 1 !important;
+        }
+
+        .border-l-secondary {
+            border-left: 4px solid transparent !important;
+            border-image: linear-gradient(180deg, #0284C7 0%, #38BDF8 60%, #BAE6FD 100%) 1 !important;
+        }
+
+        /* Active Navigation Sidebar Polish */
+        .sidebar-active-elite {
+            background: linear-gradient(90deg, rgba(37, 99, 235, 0.10) 0%, rgba(37, 99, 235, 0.02) 100%) !important;
+            position: relative !important;
+            color: #1E3A8A !important;
+            font-weight: 600 !important;
+            border-right: none !important;
+        }
+
+        .sidebar-active-elite::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: 15%;
+            height: 70%;
+            width: 3.5px;
+            background: #1D4ED8;
+            border-radius: 999px;
+            box-shadow: -2px 0 8px rgba(37, 99, 235, 0.35);
+        }
+
+        /* Table header row sticky */
+        table thead tr {
+            background: #F8FAFC !important;
+            border-bottom: 1px solid #E2E8F0 !important;
+        }
+
+        table th {
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.08em !important;
+            color: #475569 !important;
+        }
+
+        /* Table row hover illumination & dividers */
+        table tbody tr {
+            border-bottom: 1px solid #F1F5F9 !important;
+            transition: background-color 150ms ease !important;
+        }
+
+        table tbody tr:hover {
+            background-color: rgba(37, 99, 235, 0.035) !important;
+        }
+
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        @keyframes pulse-soft {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.95); }
+        }
+        .animate-pulse-soft { animation: pulse-soft 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .sparkline {
+            stroke-dasharray: 1000;
+            stroke-dashoffset: 1000;
+            animation: dash 3s linear forwards;
+        }
+        @keyframes dash { to { stroke-dashoffset: 0; } }
+        .health-gauge {
+            transform: rotate(-90deg);
+            transition: stroke-dashoffset 1s ease-out;
+        }
+        .protocol-glow-purchase { box-shadow: 0 0 12px rgba(0, 96, 172, 0.2); }
+        .protocol-glow-sales { box-shadow: 0 0 12px rgba(0, 40, 142, 0.15); }
+        .protocol-glow-warning { box-shadow: 0 0 12px rgba(245, 158, 11, 0.2); }
+        .active-glow {
+            border: 2px solid #00288e;
+            box-shadow: 0 0 0 4px rgba(0, 40, 142, 0.1), inset 0 0 12px rgba(0, 40, 142, 0.05);
+        }
+        .animate-subtle-pulse {
+            animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-subtle {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .7; }
+        }
+    </style>
+    <link rel="stylesheet" href="styles.css?v=50" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js?v=50"></script>
+  </body>
+</html>

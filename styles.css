@@ -1,0 +1,703 @@
+/* ==========================================================================
+   TALLY AUTOMATION - INSTITUTIONAL FINANCIAL INTELLIGENCE SUITE
+   LUXURY FINTECH DESIGN SYSTEM (SOVEREIGN SAPPHIRE & ALABASTER GLASS)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. DESIGN TOKENS & TYPOGRAPHY SYSTEM
+   -------------------------------------------------------------------------- */
+:root {
+  /* Bespoke 3-Tier Typography */
+  --font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Sovereign Sapphire & Deep Ink Color Architecture */
+  --ink-primary: #0B192C;
+  --ink-secondary: #0F2557;
+  --ink: #0F172A;
+  --text: #1E293B;
+  --text-secondary: #475569;
+  --muted: #64748B;
+  --line: rgba(15, 23, 42, 0.08);
+  --line-strong: rgba(15, 23, 42, 0.14);
+
+  /* Primary Jewel Royal Blues */
+  --primary: #1E3A8A;
+  --primary-royal: #1D4ED8;
+  --primary-light: #2563EB;
+  --primary-soft: #EFF6FF;
+  --primary-container: #1E40AF;
+
+  /* Accent & Secondary Blues */
+  --secondary: #0284C7;
+  --secondary-soft: #F0F9FF;
+  --secondary-container: #38BDF8;
+
+  /* Architectural Canvas & Alabaster Glass */
+  --page: #F4F7FB;
+  --surface-solid: #FFFFFF;
+  --surface: rgba(255, 255, 255, 0.94);
+  --surface-subtle: #F8FAFC;
+  --surface-recessed: #F1F5F9;
+
+  /* Semantic Precision Tints */
+  --emerald-text: #047857;
+  --emerald-bg: rgba(16, 185, 129, 0.10);
+  --emerald-border: rgba(16, 185, 129, 0.28);
+  --emerald-dot: #10B981;
+
+  --amber-text: #B45309;
+  --amber-bg: rgba(245, 158, 11, 0.10);
+  --amber-border: rgba(245, 158, 11, 0.30);
+
+  --crimson-text: #B91C1C;
+  --crimson-bg: rgba(239, 68, 68, 0.09);
+  --crimson-border: rgba(239, 68, 68, 0.25);
+
+  /* Multi-Layered Specular Shadows */
+  --shadow-card: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 1),
+    0 1px 2px 0 rgba(15, 23, 42, 0.03),
+    0 8px 24px -4px rgba(15, 23, 42, 0.05),
+    0 20px 40px -12px rgba(30, 58, 138, 0.04);
+
+  --shadow-card-hover: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 1),
+    0 4px 12px 0 rgba(15, 23, 42, 0.05),
+    0 12px 32px -4px rgba(30, 58, 138, 0.08),
+    0 24px 48px -12px rgba(30, 58, 138, 0.06);
+
+  --shadow-btn-primary: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.25),
+    0 2px 4px rgba(15, 23, 42, 0.12),
+    0 6px 16px -2px rgba(29, 78, 216, 0.32);
+
+  --shadow-btn-hover: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.35),
+    0 4px 8px rgba(15, 23, 42, 0.14),
+    0 8px 20px -2px rgba(37, 99, 235, 0.42);
+
+  --shadow-floating: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.9),
+    0 24px 60px -12px rgba(15, 23, 42, 0.08),
+    0 4px 16px -2px rgba(30, 58, 138, 0.05);
+}
+
+/* --------------------------------------------------------------------------
+   2. GLOBAL BASE & AMBIENT CANVAS BACKGROUND
+   -------------------------------------------------------------------------- */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background-color: #F4F7FB !important;
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(37, 99, 235, 0.05) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.04) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(30, 58, 138, 0.03) 0px, transparent 60%) !important;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* --------------------------------------------------------------------------
+   3. TYPOGRAPHY HIERARCHY
+   -------------------------------------------------------------------------- */
+/* Display & Section Headlines */
+h1, h2, h3, .font-display, .font-display-lg, .font-headline-md, .font-headline-sm {
+  font-family: var(--font-display) !important;
+  letter-spacing: -0.025em;
+  line-height: 1.18;
+}
+
+/* Primary Page Titles: Rich Deep-Navy-to-Cobalt Gradient Text */
+.page-headline-gradient, 
+h2.text-display-lg, 
+.page-title h1,
+.text-display-lg {
+  font-family: var(--font-display) !important;
+  letter-spacing: -0.03em !important;
+  font-weight: 800 !important;
+  background: linear-gradient(135deg, #0B192C 0%, #1E3A8A 55%, #2563EB 100%) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+/* UI Controls, Subtitles & Micro-labels */
+.text-on-surface-variant, p.text-body-lg, .text-outline {
+  letter-spacing: -0.01em;
+}
+
+.text-label-caps, .font-label-caps, th, .label-overline {
+  font-family: var(--font-sans) !important;
+  font-size: 0.6875rem !important; /* 11px */
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  color: #64748B;
+}
+
+/* Precision Monospace: Tabular Numbers on All Financial Values & Codes */
+.font-data-mono, 
+.amount, 
+.tabular-nums, 
+code, 
+[data-col="date"], 
+[data-col="invoice no"], 
+[data-col="rate"], 
+[data-col="quantity"], 
+[data-col="taxable amount"], 
+[data-col="total amount"], 
+[data-col="CGST"], 
+[data-col="SGST"], 
+[data-col="IGST"], 
+[data-col="gstin/uin"] {
+  font-family: var(--font-mono) !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* --------------------------------------------------------------------------
+   4. MULTI-LAYERED CARD SURFACES & SPECULAR HIGHLIGHTS
+   -------------------------------------------------------------------------- */
+.glass-card, 
+.glass-pro, 
+.card, 
+.panel, 
+.mini-card {
+  background: rgba(255, 255, 255, 0.94) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(15, 23, 42, 0.07) !important;
+  box-shadow: var(--shadow-card) !important;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), 
+              box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1), 
+              border-color 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.glass-card:hover, 
+.panel:hover {
+  transform: translateY(-2px);
+  border-color: rgba(37, 99, 235, 0.25) !important;
+  box-shadow: var(--shadow-card-hover) !important;
+}
+
+/* --------------------------------------------------------------------------
+   5. SIGNATURE ACCENT BORDERS (METALLIC SAPPHIRE GRADIENTS)
+   -------------------------------------------------------------------------- */
+.border-b-primary, [class*="border-b-primary"] {
+  border-bottom: 4px solid transparent !important;
+  border-image: linear-gradient(90deg, #0F172A 0%, #1E40AF 50%, #2563EB 100%) 1 !important;
+}
+
+.border-b-secondary, [class*="border-b-secondary"] {
+  border-bottom: 4px solid transparent !important;
+  border-image: linear-gradient(90deg, #1E3A8A 0%, #2563EB 60%, #38BDF8 100%) 1 !important;
+}
+
+.border-b-tertiary, [class*="border-b-tertiary"] {
+  border-bottom: 4px solid transparent !important;
+  border-image: linear-gradient(90deg, #0F172A 0%, #334155 50%, #64748B 100%) 1 !important;
+}
+
+.border-b-outline, [class*="border-b-outline"] {
+  border-bottom: 4px solid transparent !important;
+  border-image: linear-gradient(90deg, #1E40AF 0%, #3B82F6 50%, #93C5FD 100%) 1 !important;
+}
+
+.border-l-primary, [class*="border-l-primary"] {
+  border-left: 4px solid transparent !important;
+  border-image: linear-gradient(180deg, #1E3A8A 0%, #2563EB 60%, #38BDF8 100%) 1 !important;
+}
+
+.border-l-secondary, [class*="border-l-secondary"] {
+  border-left: 4px solid transparent !important;
+  border-image: linear-gradient(180deg, #0284C7 0%, #38BDF8 60%, #BAE6FD 100%) 1 !important;
+}
+
+/* --------------------------------------------------------------------------
+   6. COMMANDING BUTTONS & OUTLINED CONTROLS
+   -------------------------------------------------------------------------- */
+/* Primary Buttons with Jewel-Like Depth */
+.btn.primary, 
+button.bg-primary, 
+.glow-button, 
+#continue-btn {
+  background: linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 55%, #2563EB 100%) !important;
+  border: 1px solid rgba(30, 58, 138, 0.8) !important;
+  box-shadow: var(--shadow-btn-primary) !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.btn.primary:hover, 
+button.bg-primary:hover, 
+.glow-button:hover, 
+#continue-btn:hover {
+  background: linear-gradient(135deg, #1E40AF 0%, #2563EB 55%, #3B82F6 100%) !important;
+  box-shadow: var(--shadow-btn-hover) !important;
+  transform: translateY(-1px) !important;
+}
+
+.btn.primary:active, 
+button.bg-primary:active, 
+.glow-button:active, 
+#continue-btn:active {
+  transform: translateY(0px) !important;
+}
+
+/* Secondary Outlined Buttons & Surface Pills */
+.btn:not(.primary):not(.danger), 
+button.bg-white, 
+.btn-secondary {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%) !important;
+  border: 1px solid #CBD5E1 !important;
+  box-shadow: inset 0 1px 0 0 #FFFFFF, 0 1px 2px 0 rgba(15, 23, 42, 0.03) !important;
+  color: #0F172A !important;
+  font-weight: 600 !important;
+  transition: all 180ms ease !important;
+}
+
+.btn:not(.primary):not(.danger):hover, 
+button.bg-white:hover, 
+.btn-secondary:hover {
+  background: #F1F5F9 !important;
+  border-color: #94A3B8 !important;
+  color: #0F172A !important;
+}
+
+/* --------------------------------------------------------------------------
+   7. SEMANTIC STATUS BADGES (EMERALD, AMBER, CRIMSON)
+   -------------------------------------------------------------------------- */
+/* CONNECTED / ACTIVE / SECURED / READY / 19 SELECTED / GST ENABLED */
+.bg-emerald-50, 
+.bg-green-50, 
+[class*="bg-emerald-50"], 
+[class*="bg-green-50"] {
+  background: rgba(16, 185, 129, 0.10) !important;
+  border: 1px solid rgba(16, 185, 129, 0.28) !important;
+  color: #047857 !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.06em !important;
+  font-weight: 700 !important;
+}
+
+.bg-emerald-500, 
+.bg-green-500, 
+span.bg-emerald-500, 
+span.bg-green-500 {
+  background-color: #10B981 !important;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5) !important;
+}
+
+/* Required / Pending / Warning */
+.bg-amber-50, 
+[class*="bg-amber-50"] {
+  background: rgba(245, 158, 11, 0.10) !important;
+  border: 1px solid rgba(245, 158, 11, 0.30) !important;
+  color: #B45309 !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.06em !important;
+  font-weight: 700 !important;
+}
+
+/* LOCKED / Failed / Red */
+.bg-red-50, 
+.bg-error\/10, 
+[class*="bg-red-50"] {
+  background: rgba(239, 68, 68, 0.09) !important;
+  border: 1px solid rgba(239, 68, 68, 0.25) !important;
+  color: #B91C1C !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.06em !important;
+  font-weight: 700 !important;
+}
+
+/* --------------------------------------------------------------------------
+   8. GLOBAL SHELL (SIDEBAR, TOP BAR & 4-STEP PIPELINE)
+   -------------------------------------------------------------------------- */
+/* Left Navigation Sidebar */
+aside.w-sidebar-width {
+  background: rgba(255, 255, 255, 0.90) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-right: 1px solid rgba(226, 232, 240, 0.9) !important;
+}
+
+/* Brand Bank/Temple Emblem */
+.brand-mark, 
+aside .bg-primary.rounded-lg, 
+aside .bg-primary.rounded-2xl {
+  background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%) !important;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Active Navigation Item */
+.sidebar-active-elite, 
+nav a.sidebar-active-elite {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.10) 0%, rgba(37, 99, 235, 0.02) 100%) !important;
+  position: relative !important;
+  color: #1E3A8A !important;
+  font-weight: 600 !important;
+  border-right: none !important;
+}
+
+.sidebar-active-elite::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 15%;
+  height: 70%;
+  width: 3.5px;
+  background: #1D4ED8;
+  border-radius: 999px;
+  box-shadow: -2px 0 8px rgba(37, 99, 235, 0.35);
+}
+
+/* Bottom GATEWAY CONNECTED Card in Sidebar */
+aside .bg-gradient-to-br.from-emerald-500\/5 {
+  background: linear-gradient(145deg, rgba(236, 253, 245, 0.9) 0%, rgba(209, 250, 229, 0.5) 100%) !important;
+  border: 1px solid rgba(16, 185, 129, 0.25) !important;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.08) !important;
+}
+
+/* Top Global Command Header */
+header.h-20 {
+  background: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8) !important;
+}
+
+/* Global Search Input: Recessed porcelain pill */
+header input[type="text"] {
+  background: #F8FAFC !important;
+  border: 1px solid #E2E8F0 !important;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+  transition: all 180ms ease !important;
+}
+
+header input[type="text"]:focus {
+  background: #FFFFFF !important;
+  border-color: #3B82F6 !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12), inset 0 1px 2px rgba(15, 23, 42, 0.02) !important;
+}
+
+/* Active Company Hardware Badge */
+header .bg-primary\/10.border-primary\/20 {
+  font-family: var(--font-mono) !important;
+  background: #EFF6FF !important;
+  border: 1px solid #BFDBFE !important;
+  color: #1D4ED8 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.08) !important;
+}
+
+/* User Avatar Ring */
+header .w-10.h-10.rounded-full {
+  background: linear-gradient(135deg, rgba(30, 58, 138, 0.12) 0%, rgba(37, 99, 235, 0.18) 100%) !important;
+  border: 1px solid rgba(37, 99, 235, 0.3) !important;
+}
+
+/* 4-Stage Stepper Cards */
+.grid-cols-4 > .glass-card {
+  transition: all 200ms ease;
+}
+
+/* --------------------------------------------------------------------------
+   9. SCREEN 1: LOGIN (#login)
+   -------------------------------------------------------------------------- */
+.login-shell {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+}
+
+.login-panel {
+  width: 100%;
+  max-width: 480px;
+  padding: 40px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  box-shadow: var(--shadow-floating) !important;
+}
+
+.login-shell .input {
+  font-family: var(--font-mono) !important;
+  font-weight: 500 !important;
+  background: #F8FAFC !important;
+  border: 1px solid #CBD5E1 !important;
+  border-radius: 12px;
+  height: 48px;
+  transition: all 180ms ease !important;
+}
+
+.login-shell .input:focus {
+  background: #FFFFFF !important;
+  border-color: #2563EB !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+}
+
+/* --------------------------------------------------------------------------
+   10. SCREEN 2: DASHBOARD (#dashboard)
+   -------------------------------------------------------------------------- */
+/* 4 Primary KPI Figures */
+.text-\[40px\].font-display-lg {
+  font-family: var(--font-display) !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.035em !important;
+  font-variant-numeric: tabular-nums !important;
+  color: #0F172A !important;
+}
+
+/* KPI Top-Left Icon Badges */
+.glass-pro .w-12.h-12.rounded-2xl {
+  background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%) !important;
+  border: 1px solid rgba(59, 130, 246, 0.18) !important;
+  color: #1D4ED8 !important;
+}
+
+/* Mapping Integrity Progress Bar */
+.h-1\.5.bg-surface-container-highest .bg-secondary {
+  background: linear-gradient(90deg, #1E3A8A 0%, #2563EB 60%, #38BDF8 100%) !important;
+}
+
+/* Sparkline Trend Line Bezier */
+.sparkline {
+  stroke: #2563EB !important;
+  stroke-width: 2.5px !important;
+}
+
+/* Sync Intelligence Circular Progress */
+.health-gauge {
+  stroke: url(#healthGradient) !important;
+  transform: rotate(-90deg);
+  transition: stroke-dashoffset 1s ease-out;
+}
+
+/* --------------------------------------------------------------------------
+   11. SCREEN 3: SYNCHRONIZATION (#sync)
+   -------------------------------------------------------------------------- */
+/* 3 Inner Metric Boxes */
+.glass-pro .grid-cols-3 .p-4.bg-surface-container {
+  background: linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%) !important;
+  border: 1px solid #E2E8F0 !important;
+  box-shadow: inset 0 1px 0 #FFFFFF, 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+}
+
+.glass-pro .grid-cols-3 .text-2xl {
+  font-family: var(--font-mono) !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* Setup Guide Step Rows */
+.glass-pro .space-y-3 .p-3.bg-surface-container\/60 {
+  background: #F8FAFC !important;
+  border: 1px solid #E2E8F0 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02) !important;
+}
+
+/* 9-Tile Last Sync Master Breakdown Grid */
+.grid-cols-3.md\:grid-cols-9 .p-3.bg-surface-container {
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+  transition: all 180ms ease !important;
+}
+
+.grid-cols-3.md\:grid-cols-9 .p-3.bg-surface-container:hover {
+  border-color: rgba(37, 99, 235, 0.35) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.08) !important;
+}
+
+.grid-cols-3.md\:grid-cols-9 .text-base.font-black {
+  font-family: var(--font-mono) !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* --------------------------------------------------------------------------
+   12. SCREEN 4: AUTOMATION HOME (#automation)
+   -------------------------------------------------------------------------- */
+/* Filter Active Pill */
+button.bg-primary.rounded-full {
+  background: linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 55%, #2563EB 100%) !important;
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.28) !important;
+}
+
+/* Selected Workflow Card Accent Glow */
+.glass-card.active-glow {
+  border: 1.5px solid #1D4ED8 !important;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), 0 12px 28px -4px rgba(15, 23, 42, 0.08) !important;
+}
+
+/* --------------------------------------------------------------------------
+   13. SCREEN 5: UPLOAD EXCEL (#upload)
+   -------------------------------------------------------------------------- */
+/* Notification Toast Banner */
+.bg-slate-900.text-white.rounded-2xl {
+  background: linear-gradient(90deg, #0B132B 0%, #1E293B 100%) !important;
+  border: 1px solid rgba(59, 130, 246, 0.3) !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15) !important;
+}
+
+/* Dropzone Inset Dashed Border */
+section.glass-card.p-10.text-center {
+  border: 1.5px dashed #CBD5E1 !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%) !important;
+}
+
+section.glass-card.p-10.text-center:hover {
+  border-color: #3B82F6 !important;
+}
+
+/* Excel Green Icon Glass Tile */
+.bg-\[\#107C41\]\/10 {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.14) 0%, rgba(5, 150, 105, 0.08) 100%) !important;
+  border: 1px solid rgba(16, 185, 129, 0.25) !important;
+  box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.25) !important;
+}
+
+/* Purchase GST Workflow Section Emerald-Porcelain Tint */
+.bg-green-50\/70.border-green-200 {
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.7) 0%, rgba(255, 255, 255, 0.95) 100%) !important;
+  border: 1px solid rgba(16, 185, 129, 0.25) !important;
+}
+
+/* Mode Selector Active Card Ring */
+button.border-primary.ring-2.ring-primary\/10 {
+  border: 2px solid #1E3A8A !important;
+  box-shadow: 0 4px 16px rgba(30, 58, 138, 0.12) !important;
+}
+
+/* --------------------------------------------------------------------------
+   14. SCREEN 6: VALIDATION & MAPPING (#mapping)
+   -------------------------------------------------------------------------- */
+/* Top Summary Pill */
+.bg-white.border.border-outline-variant.rounded-full {
+  background: #FFFFFF !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05) !important;
+}
+
+/* Table Sticky Header */
+table thead tr {
+  background: #F8FAFC !important;
+  border-bottom: 1px solid #E2E8F0 !important;
+}
+
+table th {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  color: #475569 !important;
+}
+
+/* Table Row Hover Illumination & Crisp Horizontal Dividers */
+table tbody tr {
+  border-bottom: 1px solid #F1F5F9 !important;
+  transition: background-color 150ms ease !important;
+}
+
+table tbody tr:hover {
+  background-color: rgba(37, 99, 235, 0.035) !important;
+}
+
+/* Command Center Strip */
+.glass-card.p-2.rounded-2xl.border.border-outline-variant {
+  background: #F8FAFC !important;
+  border: 1px solid #E2E8F0 !important;
+}
+
+/* --------------------------------------------------------------------------
+   15. SCREEN 7: SEND TO TALLY (#success)
+   -------------------------------------------------------------------------- */
+/* Transmission Summary Hero Banner: Royal Sapphire & Midnight Indigo */
+.bg-primary.text-on-primary.shadow-2xl.rounded-2xl {
+  background: 
+    radial-gradient(circle at 85% 50%, rgba(56, 189, 248, 0.22) 0%, transparent 55%),
+    linear-gradient(135deg, #0B192C 0%, #1E3A8A 48%, #1D4ED8 100%) !important;
+  box-shadow: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.2),
+    0 20px 40px -12px rgba(30, 58, 138, 0.35) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Frosted Glass Badges inside Hero Banner */
+.bg-primary-container.border-primary-fixed\/20 {
+  background: rgba(255, 255, 255, 0.10) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+}
+
+/* 19 / 19 in Plus Jakarta Sans 800 */
+.text-display-lg.font-black.text-primary {
+  font-family: var(--font-display) !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.03em !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* Primary Execution CTA Button */
+button.group.p-6.rounded-2xl {
+  background: linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 55%, #2563EB 100%) !important;
+  box-shadow: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.3),
+    0 8px 24px rgba(29, 78, 216, 0.35),
+    0 0 0 1px rgba(30, 58, 138, 0.8) !important;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+button.group.p-6.rounded-2xl:hover {
+  background: linear-gradient(135deg, #1E40AF 0%, #2563EB 55%, #3B82F6 100%) !important;
+  box-shadow: 
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.4),
+    0 12px 32px rgba(37, 99, 235, 0.45) !important;
+  transform: translateY(-1px) !important;
+}
+
+/* --------------------------------------------------------------------------
+   16. DATA TABLE CONTROLS & UTILITIES
+   -------------------------------------------------------------------------- */
+.table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.editable {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #FFFFFF;
+}
+
+.editable.warn {
+  border-color: var(--amber-text);
+  background: var(--amber-bg);
+}
+
+.editable.error {
+  border-color: var(--crimson-text);
+  background: var(--crimson-bg);
+}

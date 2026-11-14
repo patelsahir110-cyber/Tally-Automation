@@ -1,0 +1,51 @@
+{
+  "name": "tally-automation",
+  "version": "1.0.2",
+  "description": "Local Tally Data Entry Automation System",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.0"
+  },
+  "build": {
+    "appId": "com.tally.automation",
+    "productName": "Tally Automation",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Tally Automation"
+    },
+    "extraResources": [
+      {
+        "from": "dist/server.exe",
+        "to": "server.exe"
+      },
+      {
+        "from": "Tamplate",
+        "to": "Tamplate"
+      },
+      "index.html",
+      "app.js",
+      "styles.css"
+    ],
+    "files": [
+      "main.js",
+      "package.json"
+    ]
+  }
+}
