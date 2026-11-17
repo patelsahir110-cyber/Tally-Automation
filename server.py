@@ -2863,6 +2863,9 @@ class DestockHandler(SimpleHTTPRequestHandler):
                 if task_data.get("voucherTypesXml"):
                     vtypes = extract_names(task_data["voucherTypesXml"])
                     replace_master_snapshot(db_conn, "voucher_type", vtypes, task_data["voucherTypesXml"])
+                if task_data.get("vouchersXml"):
+                    vouchers = extract_vouchers(task_data["vouchersXml"])
+                    replace_voucher_snapshot(db_conn, vouchers)
 
             json_response(self, {"ok": True, "counts": master_counts()})
             return
@@ -3291,8 +3294,9 @@ class DestockHandler(SimpleHTTPRequestHandler):
 def main() -> None:
     init_db()
     port = int(os.environ.get("PORT", os.environ.get("DESTOCK_PORT", "4173")))
-    server = ThreadingHTTPServer(("0.0.0.0", port), DestockHandler)
-    print(f"Destock running at http://127.0.0.1:{port}")
+    host = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
+    server = ThreadingHTTPServer((host, port), DestockHandler)
+    print(f"Destock running at http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
