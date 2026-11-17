@@ -174,8 +174,11 @@ function go(screen) {
 
 function activeStatus() {
   const online = state.tally.online;
+  const isConnector = state.tally.connectorLinked;
   const warning = !online && state.tally.tallyRunning;
-  const label = online ? "Tally Online" : warning ? "Tally Open" : "Tally Offline";
+  const label = online 
+    ? (isConnector ? "Connector Linked" : "Tally Online") 
+    : warning ? "Tally Open" : "Connector Offline";
   const tone = online ? "online" : warning ? "warning" : "offline";
   return `<span class="status-pill ${tone}" title="${state.tally.message || ""}"><span class="dot"></span>${label}</span>`;
 }
@@ -2173,6 +2176,16 @@ async function authEmailSignUp() {
   }
 }
 
+function loginAsGuestAccount() {
+  localStorage.setItem("tally_offline_mode", "true");
+  localStorage.setItem("tally_username", "guest-01");
+  localStorage.setItem("tally_selected_plan", "Enterprise Pro");
+  state.authenticated = true;
+  state.selectedPlan = "Enterprise Pro";
+  state.notice = "Logged in as Guest (guest-01). Paired with Tally Automation Connector.";
+  go("dashboard");
+}
+
 function useOfflineMode() {
   localStorage.setItem("tally_offline_mode", "true");
   state.authenticated = true;
@@ -2258,6 +2271,11 @@ function auth() {
         <button class="btn primary large w-full mt-6 flex items-center justify-center gap-2 glow-button text-xs font-bold py-3.5 rounded-2xl" onclick="${isSignIn ? 'authEmailLogin()' : 'authEmailSignUp()'}">
           <span class="material-symbols-outlined text-[18px]">${isSignIn ? "login" : "person_add"}</span>
           ${isSignIn ? "Sign In with Password" : "Create Account & Sign In"}
+        </button>
+
+        <button class="btn secondary large w-full mt-3 flex items-center justify-center gap-2 text-xs font-bold py-3.5 rounded-2xl bg-secondary text-white shadow-md hover:bg-secondary-container transition-all" onclick="loginAsGuestAccount()">
+          <span class="material-symbols-outlined text-[18px]">verified_user</span>
+          Sign In as Guest (guest-01) - Connector Paired
         </button>
 
         <div class="mt-4 flex flex-col items-center gap-2">
@@ -2445,17 +2463,11 @@ function login() {
       
       <!-- Tally Company Name (Required) -->
       <div class="field !mt-3">
-        <label class="text-xs font-semibold text-on-surface">Tally Company Name (Required)</label>
+        <label class="text-xs font-semibold text-on-surface">Active Tally Company (Reported by Connector)</label>
         <div class="flex gap-2 mt-1">
-          <input class="input flex-1" value="${escapeHtml(state.selectedTallyCompany || "")}" oninput="onCompanyInput(event)" placeholder="e.g. Lemon Company" />
-          <button class="px-3.5 py-2.5 bg-secondary/10 hover:bg-secondary/20 text-secondary text-xs font-bold rounded-xl transition-all border border-secondary/20 flex items-center gap-1 shrink-0" onclick="autoDetectCompany()">
-            <span class="material-symbols-outlined text-[16px]">sync_saved_locally</span>
-            Auto Detect
-          </button>
+          <input class="input flex-1 bg-surface-container-low" value="${escapeHtml(state.selectedTallyCompany || state.tally.company || "Waiting for Connector...")}" readonly placeholder="Connected Company..." />
         </div>
       </div>
-
-      <div class="field !mt-3"><label class="text-xs font-semibold text-on-surface">Local Tally URL</label><input class="input" value="http://127.0.0.1:9000" /></div>
       <button id="continue-btn" class="btn primary large w-full mt-6 ${isFormValid ? '' : 'opacity-50 cursor-not-allowed'}" ${isFormValid ? '' : 'disabled'} onclick="go('dashboard'); refreshAll();">${icon("check")} Continue to dashboard</button>
       <div class="mt-4 text-center text-body-md font-bold text-slate-900 bg-slate-100 p-4 rounded-xl border border-slate-200">
         ${state.tally.message || "Ready to check local Tally."}
@@ -6372,6 +6384,34 @@ async function initializeApp() {
   await checkAuthSession();
   render();
   refreshAll();
+
+  // Instant Real-Time Bridge: Auto-synchronize whenever Tally Connector updates
+  setInterval(async () => {
+    try {
+      const tally = await api("/api/tally/status");
+      const companyChanged = tally.company && tally.company !== state.selectedTallyCompany;
+      const statusChanged = tally.online !== state.tally.online || tally.connectorLinked !== state.tally.connectorLinked;
+
+      state.tally = tally;
+      if (tally.company) {
+        state.selectedTallyCompany = tally.company;
+      }
+
+      // If connector synced new masters or switched company, auto-update the UI immediately!
+      if (companyChanged || statusChanged || state.tally.connectorLinked) {
+        const [masters, hist] = await Promise.all([
+          api("/api/masters"),
+          api("/api/history")
+        ]);
+        const countDiff = (masters.counts?.ledgers || 0) !== (state.masters.counts?.ledgers || 0);
+        if (companyChanged || statusChanged || countDiff) {
+          state.masters = masters;
+          state.history = hist;
+          render();
+        }
+      }
+    } catch (e) {}
+  }, 2000);
 }
 
 initializeApp();

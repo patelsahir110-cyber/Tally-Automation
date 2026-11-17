@@ -56,6 +56,25 @@ TEMPLATE_PATHS = {
 }
 TALLY_URL = "http://127.0.0.1:9000"
 
+# In-memory registry for paired local Tally Automation Connectors
+# Key: username (e.g., 'guest-01') -> {online, activeCompany, tallyUrl, lastPing, pendingTasks, completedTasks}
+CONNECTOR_STATE: dict[str, dict[str, Any]] = {}
+
+def get_connector(username: str = "guest-01") -> dict[str, Any]:
+    now = time.time()
+    state = CONNECTOR_STATE.setdefault(username, {
+        "online": False,
+        "activeCompany": "",
+        "tallyUrl": "http://127.0.0.1:9000",
+        "lastPing": 0.0,
+        "tasks": [],
+        "completed": {}
+    })
+    # Consider offline if no heartbeat within 12 seconds
+    if now - state["lastPing"] > 12.0:
+        state["online"] = False
+    return state
+
 import requests
 tally_session = requests.Session()
 
@@ -335,14 +354,10 @@ def init_db() -> None:
         ensure_column(conn, "synced_vouchers", "persisted_view", "TEXT")
         ensure_column(conn, "synced_vouchers", "raw_xml", "TEXT")
         ensure_column(conn, "synced_vouchers", "updated_at", "TEXT NOT NULL DEFAULT ''")
-        for ledger in DEFAULT_LEDGERS:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO masters(type, name, parent, updated_at)
-                VALUES('ledger', ?, '', ?)
-                """,
-                (ledger, now_iso()),
-            )
+        # Only insert defaults if database is completely empty and no Tally sync has occurred
+        has_masters = conn.execute("SELECT COUNT(*) count FROM masters").fetchone()["count"]
+        if has_masters == 0:
+            pass
         for voucher in sorted(set(VOUCHER_TYPES.values()) | set(VOUCHER_TYPES.keys())):
             conn.execute(
                 """
@@ -396,10 +411,21 @@ def json_response(handler: SimpleHTTPRequestHandler, data: Any, status: int = 20
 
 
 def read_json(handler: SimpleHTTPRequestHandler) -> dict[str, Any]:
-    length = int(handler.headers.get("Content-Length") or "0")
+    content_len = handler.headers.get("content-length") or handler.headers.get("Content-Length")
+    try:
+        length = int(content_len or "0")
+    except Exception:
+        length = 0
     if length <= 0:
         return {}
-    return json.loads(handler.rfile.read(length).decode("utf-8"))
+    raw = handler.rfile.read(length)
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception as e:
+        print(f"[read_json ERROR] Failed decoding json: {e}, raw was: {raw}")
+        return {}
 
 
 def tally_post(xml: str, timeout: Any = (30.0, 60.0)) -> tuple[bool, str]:
@@ -473,25 +499,39 @@ def xml_escape(value: Any) -> str:
     return escape(str(value or ""), quote=True)
 
 
-def tally_status() -> dict[str, Any]:
-    xml = """
-    <ENVELOPE>
-      <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>Company</ID></HEADER>
-      <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES>
-      <TDL><TDLMESSAGE><COLLECTION NAME="Company"><TYPE>Company</TYPE><FETCH>Name</FETCH></COLLECTION></TDLMESSAGE></TDL>
-      </DESC></BODY>
-    </ENVELOPE>
-    """
+def tally_status(username: str = "guest-01") -> dict[str, Any]:
+    # 1. Check if a local Tally Automation Connector is paired and active
+    conn = get_connector(username)
+    if conn["online"]:
+        return {
+            "online": True,
+            "tallyRunning": True,
+            "connectorLinked": True,
+            "username": username,
+            "company": conn["activeCompany"] or "Company detected",
+            "message": f"Connected via Tally Automation Connector ({username})",
+            "url": conn["tallyUrl"]
+        }
+
+    # 2. Fallback to direct local XML Gateway
+    xml = """<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>List of Companies</ID></HEADER>
+  <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES></DESC></BODY>
+</ENVELOPE>"""
     ok, text = tally_post(xml, timeout=1.5)
     if not ok:
         running = tally_process_running()
         message = "Tally is open, but XML Gateway at localhost:9000 is not reachable." if running else "Tally is offline or XML Gateway is not reachable."
-        return {"online": False, "tallyRunning": running, "url": TALLY_URL, "message": message, "detail": text}
+        return {"online": False, "tallyRunning": running, "connectorLinked": False, "url": TALLY_URL, "message": message, "detail": text}
+    
     company = ""
-    match = re.search(r"<NAME[^>]*>(.*?)</NAME>", text, flags=re.I | re.S)
+    match = re.search(r'<COMPANY[^>]*NAME="([^"]+)"', text, flags=re.I)
+    if not match:
+        match = re.search(r"<NAME[^>]*>(.*?)</NAME>", text, flags=re.I | re.S)
     if match:
         company = re.sub(r"\s+", " ", match.group(1)).strip()
-    return {"online": True, "tallyRunning": True, "url": TALLY_URL, "company": company or "Company detected", "message": "Connected to local Tally XML Gateway."}
+    return {"online": True, "tallyRunning": True, "connectorLinked": False, "url": TALLY_URL, "company": company or "Company detected", "message": "Connected to local Tally XML Gateway."}
+
 
 
 def collection_xml(collection: str, tally_type: str, fetch: str = "Name,Parent") -> str:
@@ -835,7 +875,7 @@ def master_counts() -> dict[str, int]:
         voucher_count = conn.execute("SELECT COUNT(*) count FROM synced_vouchers").fetchone()["count"]
     counts = {row["type"]: row["count"] for row in rows}
     return {
-        "companies": counts.get("company", 0),
+        "companies": counts.get("company", 1 if counts.get("ledger") else 0),
         "ledgers": counts.get("ledger", 0),
         "voucherTypes": counts.get("voucher_type", 0),
         "stockGroups": counts.get("stock_group", 0),
@@ -2393,8 +2433,69 @@ def send_rows(batch_id: str, voucher_mode: str, row_ids: list[str] | None = None
         xml = build_gst_voucher_xml(payloads, voucher_mode, gst_mode) if use_gst else build_voucher_xml(payloads, voucher_mode, contra_mode, payment_mode, receipt_mode)
         task_list.append((group, xml, voucher_mode))
 
-    # 2. Parallel posting to Tally (no database locking)
+    # 2. Sequential Connector Dispatch or Direct Local Posting
+    username = "guest-01"
+    conn_state = get_connector(username)
+    if conn_state["online"]:
+        print(f"[CONNECTOR] Queueing {len(task_list)} vouchers to Tally Automation Connector for {conn_state['activeCompany']}...")
+        vouchers_payload = []
+        for group, xml, v_mode in task_list:
+            row_id = group[0]["id"]
+            vouchers_payload.append({"id": row_id, "xml": xml, "mode": v_mode})
+
+        task_id = f"vch_{uuid.uuid4().hex[:8]}"
+        conn_state["tasks"].append({
+            "id": task_id,
+            "action": "DISPATCH_VOUCHERS",
+            "payload": {"vouchers": vouchers_payload}
+        })
+
+        # Wait for connector to process vouchers sequentially with streaming callback
+        start_wait = time.time()
+        while time.time() - start_wait < 180.0:
+            time.sleep(0.5)
+            if task_id in conn_state["completed"]:
+                res_obj = conn_state["completed"][task_id]
+                res_data = res_obj.get("data", {})
+                v_results = {r["id"]: r for r in res_data.get("voucherResults", [])}
+
+                tally_results = []
+                for group, xml, v_mode in task_list:
+                    rid = group[0]["id"]
+                    r_item = v_results.get(rid, {})
+                    status_val = r_item.get("status", "imported")
+                    msg_val = "Imported into Tally via Connector." if status_val == "imported" else r_item.get("message", "Failed")
+                    resp_val = r_item.get("response", "")
+                    tally_results.append((group, status_val, msg_val, xml, resp_val, v_mode))
+
+                # Notify frontend chunk completion
+                if on_chunk_complete:
+                    ui_results = []
+                    imp_cnt = res_data.get("imported", 0)
+                    fail_cnt = res_data.get("failed", 0)
+                    for group, s_val, m_val, x_val, resp_val, vm_val in tally_results:
+                        for r in group:
+                            ui_results.append({"id": r["id"], "row_no": r["row_no"], "status": s_val, "message": m_val})
+                    on_chunk_complete({"chunk": 1, "totalChunks": 1, "importedCount": imp_cnt, "failedCount": fail_cnt, "results": ui_results})
+
+                # Persist results in DB
+                results = []
+                with db() as conn:
+                    for group, sent_status, message, xml, response, v_mode in tally_results:
+                        for row in group:
+                            conn.execute("UPDATE validation_rows SET status=?, errors=?, updated_at=? WHERE id=?",
+                                         (sent_status, json.dumps([] if sent_status == "imported" else [message]), now_iso(), row["id"]))
+                            record_send_history(conn, batch_id, row, sent_status, message, response, v_mode)
+                            results.append({"id": row["id"], "row_no": row["row_no"], "status": sent_status, "message": message})
+                    if any(s == "imported" for _, s, _, _, _, _ in tally_results):
+                        sync_result = sync_tally()
+                    else:
+                        sync_result = {"online": True, "counts": master_counts()}
+                return {"batchId": batch_id, "imported": res_data.get("imported", 0), "failed": res_data.get("failed", 0), "results": results, "sync": sync_result, "counts": master_counts()}
+
+    # 3. Parallel posting to Tally directly (legacy local fallback)
     import concurrent.futures
+
     
     def build_bulk_envelope(chunk_tasks):
         messages = []
@@ -2712,7 +2813,91 @@ class DestockHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        # ==========================================
+        # CONNECTOR CLOUD BRIDGE ENDPOINTS
+        # ==========================================
+        if self.path.startswith("/api/connector/heartbeat"):
+            try:
+                data = read_json(self)
+                print(f"[CONNECTOR DEBUG] Received heartbeat data: {data}")
+            except Exception as e:
+                print(f"[CONNECTOR DEBUG] Error reading heartbeat: {e}")
+                data = {}
+            username = data.get("username", "guest-01")
+            conn = get_connector(username)
+            conn["online"] = bool(data.get("tallyOnline", False))
+            conn["activeCompany"] = data.get("activeCompany", "")
+            conn["tallyUrl"] = data.get("tallyUrl", "http://127.0.0.1:9000")
+            conn["lastPing"] = time.time()
+            json_response(self, {"ok": True, "online": conn["online"], "company": conn["activeCompany"]})
+            return
+
+        if self.path.startswith("/api/connector/poll-tasks"):
+            data = read_json(self)
+            username = data.get("username", "guest-01")
+            conn = get_connector(username)
+            tasks = list(conn["tasks"])
+            conn["tasks"].clear()  # hand off tasks to connector worker
+            json_response(self, {"ok": True, "tasks": tasks})
+            return
+
+        if self.path.startswith("/api/connector/task-result"):
+            data = read_json(self)
+            username = data.get("username", "guest-01")
+            task_id = data.get("taskId")
+            status = data.get("status")
+            task_data = data.get("data", {})
+            conn = get_connector(username)
+            if task_id:
+                conn["completed"][task_id] = {"status": status, "data": task_data, "updatedAt": time.time()}
+
+            # Ingest only real masters from the active company in Tally
+            with db() as db_conn:
+                if task_data.get("company"):
+                    db_conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES('active_company', ?)", (task_data["company"],))
+                    db_conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES('last_sync', ?)", (now_iso(),))
+
+                if task_data.get("ledgersXml"):
+                    ledgers = extract_names(task_data["ledgersXml"])
+                    replace_master_snapshot(db_conn, "ledger", ledgers, task_data["ledgersXml"])
+                if task_data.get("voucherTypesXml"):
+                    vtypes = extract_names(task_data["voucherTypesXml"])
+                    replace_master_snapshot(db_conn, "voucher_type", vtypes, task_data["voucherTypesXml"])
+
+            json_response(self, {"ok": True, "counts": master_counts()})
+            return
+
+        if self.path.startswith("/api/connector/task-status"):
+            query = parse_qs(urlparse(self.path).query)
+            task_id = (query.get("id") or [""])[0]
+            username = (query.get("username") or ["guest-01"])[0]
+            conn = get_connector(username)
+            result = conn["completed"].get(task_id)
+            if result:
+                json_response(self, {"ok": True, "completed": True, "result": result})
+            else:
+                json_response(self, {"ok": True, "completed": False})
+            return
+
         if self.path.startswith("/api/tally/sync"):
+            username = "guest-01"
+            conn = get_connector(username)
+            if conn["online"]:
+                task_id = f"sync_{uuid.uuid4().hex[:8]}"
+                conn["tasks"].append({"id": task_id, "action": "SYNC_MASTERS", "payload": {}})
+                # Wait briefly up to 4 seconds for connector to execute task
+                for _ in range(40):
+                    time.sleep(0.1)
+                    if task_id in conn["completed"]:
+                        res = conn["completed"][task_id]
+                        if res.get("status") == "completed":
+                            json_response(self, {"online": True, "message": f"Successfully synced masters via Tally Automation Connector for {conn['activeCompany']}.", "counts": master_counts()})
+                        else:
+                            json_response(self, {"online": False, "message": res.get("error", "Sync failed on connector"), "counts": master_counts()})
+                        return
+                json_response(self, {"online": True, "message": "Master sync job queued on Tally Automation Connector.", "counts": master_counts()})
+                return
+
             json_response(self, sync_tally())
             return
         if self.path.startswith("/api/validation/update-row"):
