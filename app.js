@@ -3,6 +3,8 @@ const screens = {
   plans: { title: "Choose Plan" },
   login: { title: "Login" },
   dashboard: { title: "Dashboard" },
+  masters: { title: "Tally Masters" },
+  bank_import: { title: "Bank Statement Import" },
   sync: { title: "Synchronization" },
   automation: { title: "Automation" },
   upload: { title: "Upload Excel" },
@@ -24,6 +26,33 @@ const state = {
   showProfileDropdown: false,
   currentPage: 1,
   pageSize: 50,
+  mastersActiveTab: "ledger",
+  mastersSearchQuery: "",
+  mastersSortBy: "name",
+  mastersSortDir: "asc",
+  mastersPage: 1,
+  mastersPageSize: 25,
+  syncingMastersStatus: "idle",
+  syncingMastersMessage: "",
+  bankImportStatement: null,
+  bankImportTransactions: [],
+  bankImportTargetLedger: "",
+  bankImportSearch: "",
+  bankImportFilterType: "all",
+  bankImportFilterLedgerStatus: "all",
+  bankImportFilterSendStatus: "all",
+  bankImportMinAmount: "",
+  bankImportMaxAmount: "",
+  bankImportSelectedIds: [],
+  bankImportPage: 1,
+  bankImportPageSize: 25,
+  bankImportHistoryStack: [],
+  bankImportUploadBusy: false,
+  bankImportSendBusy: false,
+  bankImportModalRow: null,
+  bankImportHighlightedText: "",
+  bankImportNewLedgerName: "",
+  bankImportNewLedgerGroup: "Sundry Debtors",
   tally: { online: false, message: "Checking Tally..." },
   selectedTallyCompany: "",
   masters: { counts: { companies: 0, ledgers: 0, voucherTypes: 0, stockGroups: 0, stockCategories: 0, stockItems: 0, units: 0, godowns: 0, gstLedgers: 0, vouchers: 0 }, masters: [] },
@@ -330,6 +359,8 @@ function stepperTailwind(active) {
 function tailwindShell(active, content) {
   const nav = [
     ["dashboard", "Dashboard", "dashboard"],
+    ["masters", "Masters", "database"],
+    ["bank_import", "Bank Import", "receipt_long"],
     ["sync", "Synchronization", "sync"],
     ["automation", "Automation", "robot_2"],
     ["upload", "Upload Excel", "upload_file"],
@@ -2550,10 +2581,14 @@ function dashboard() {
         <h2 class="text-display-lg font-black text-primary">Intelligence Command</h2>
         <p class="text-body-lg text-outline/80 max-w-2xl">Orchestrating high-fidelity data synchronization between your ecosystem and Tally ERP 9 instance.</p>
       </div>
-      <div class="flex gap-4">
-        <button class="flex items-center gap-2.5 px-6 py-3 rounded-xl glass-pro border-primary/10 text-primary font-bold hover:bg-primary hover:text-white transition-all shadow-sm group" onclick="go('upload')">
+      <div class="flex flex-wrap gap-3">
+        <button class="flex items-center gap-2.5 px-5 py-3 rounded-xl bg-primary text-white font-bold hover:shadow-lg hover:shadow-primary/25 transition-all shadow-sm group" onclick="go('bank_import')">
+          <span class="material-symbols-outlined text-[20px] group-hover:scale-110 transition-transform">receipt_long</span>
+          <span>Bank Statement Import (Bulk PDF)</span>
+        </button>
+        <button class="flex items-center gap-2.5 px-5 py-3 rounded-xl glass-pro border border-primary/20 text-primary font-bold hover:bg-primary hover:text-white transition-all shadow-sm group" onclick="go('upload')">
           <span class="material-symbols-outlined text-[20px] group-hover:rotate-12 transition-transform">cloud_upload</span>
-          <span>Upload Master Data</span>
+          <span>Upload Excel Vouchers</span>
         </button>
       </div>
     </div>
@@ -3299,6 +3334,1565 @@ function setAutomationFilter(filter) {
   render();
 }
 
+// ------------------------------------------------------------------
+// MASTERS BROWSER & SYNC (PHASE 1)
+// ------------------------------------------------------------------
+async function syncMastersAction() {
+  if (state.syncingMastersStatus === "syncing") return;
+  state.syncingMastersStatus = "syncing";
+  state.syncingMastersMessage = "Initiating export from TallyPrime via Connector queue...";
+  render();
+
+  try {
+    const result = await api("/api/tally/sync", { method: "POST" });
+    state.lastSyncResult = result;
+    if (result && result.online) {
+      state.syncingMastersStatus = "done";
+      state.syncingMastersMessage = result.message || "All Tally masters synchronized successfully.";
+      await refreshAll();
+    } else {
+      state.syncingMastersStatus = "failed";
+      state.syncingMastersMessage = result?.message || "Tally synchronization failed or connector offline.";
+    }
+  } catch (err) {
+    state.syncingMastersStatus = "failed";
+    state.syncingMastersMessage = err.message || "Failed to communicate with server.";
+  } finally {
+    render();
+  }
+}
+
+function setMastersTab(tab) {
+  state.mastersActiveTab = tab;
+  state.mastersPage = 1;
+  render();
+}
+
+function setMastersSearch(q) {
+  state.mastersSearchQuery = q;
+  state.mastersPage = 1;
+  const container = document.getElementById("masters-table-content");
+  if (container) {
+    container.innerHTML = renderMastersTableContent();
+  } else {
+    render();
+  }
+}
+
+function setMastersSort(field) {
+  if (state.mastersSortBy === field) {
+    state.mastersSortDir = state.mastersSortDir === "asc" ? "desc" : "asc";
+  } else {
+    state.mastersSortBy = field;
+    state.mastersSortDir = "asc";
+  }
+  const container = document.getElementById("masters-table-content");
+  if (container) {
+    container.innerHTML = renderMastersTableContent();
+  } else {
+    render();
+  }
+}
+
+function setMastersPage(p) {
+  state.mastersPage = Math.max(1, p);
+  const container = document.getElementById("masters-table-content");
+  if (container) {
+    container.innerHTML = renderMastersTableContent();
+  } else {
+    render();
+  }
+}
+
+function setMastersPageSize(sz) {
+  state.mastersPageSize = Number(sz) || 25;
+  state.mastersPage = 1;
+  const container = document.getElementById("masters-table-content");
+  if (container) {
+    container.innerHTML = renderMastersTableContent();
+  } else {
+    render();
+  }
+}
+
+function getFilteredMastersList() {
+  const all = (state.masters && Array.isArray(state.masters.masters)) ? state.masters.masters : [];
+  const currentTab = state.mastersActiveTab || "ledger";
+
+  let list = all.filter(item => (item.type || "").toLowerCase() === currentTab.toLowerCase());
+
+  const q = (state.mastersSearchQuery || "").trim().toLowerCase();
+  if (q) {
+    list = list.filter(item => {
+      const n = (item.name || "").toLowerCase();
+      const p = (item.parent || "").toLowerCase();
+      const u = (item.unit || "").toLowerCase();
+      const f = (item.formal_name || "").toLowerCase();
+      const b = (item.opening_balance || "").toLowerCase();
+      return n.includes(q) || p.includes(q) || u.includes(q) || f.includes(q) || b.includes(q);
+    });
+  }
+
+  const sortBy = state.mastersSortBy || "name";
+  const sortDir = state.mastersSortDir === "desc" ? -1 : 1;
+  list.sort((a, b) => {
+    let valA = a[sortBy] ?? "";
+    let valB = b[sortBy] ?? "";
+    if (typeof valA === "string") valA = valA.toLowerCase();
+    if (typeof valB === "string") valB = valB.toLowerCase();
+    if (valA < valB) return -1 * sortDir;
+    if (valA > valB) return 1 * sortDir;
+    return 0;
+  });
+
+  return list;
+}
+
+function renderMastersTableContent() {
+  const currentTab = state.mastersActiveTab || "ledger";
+  const list = getFilteredMastersList();
+  const total = list.length;
+  const pageSize = state.mastersPageSize || 25;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(Math.max(1, state.mastersPage || 1), totalPages);
+  const startIndex = (currentPage - 1) * pageSize;
+  const pageItems = list.slice(startIndex, startIndex + pageSize);
+
+  const sortIcon = (col) => {
+    if (state.mastersSortBy !== col) {
+      return `<span class="material-symbols-outlined text-[14px] opacity-30 group-hover:opacity-100 transition-opacity">unfold_more</span>`;
+    }
+    return state.mastersSortDir === "asc"
+      ? `<span class="material-symbols-outlined text-[14px] text-primary">arrow_upward</span>`
+      : `<span class="material-symbols-outlined text-[14px] text-primary">arrow_downward</span>`;
+  };
+
+  let tableHeaderHtml = "";
+  if (currentTab === "ledger") {
+    tableHeaderHtml = `
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] w-12">#</th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('name')">
+        <div class="flex items-center gap-1.5"><span>Ledger Name (Exact in Tally)</span> ${sortIcon('name')}</div>
+      </th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('parent')">
+        <div class="flex items-center gap-1.5"><span>Parent Group</span> ${sortIcon('parent')}</div>
+      </th>
+      <th class="p-4 text-right font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('opening_balance')">
+        <div class="flex items-center justify-end gap-1.5"><span>Opening Balance</span> ${sortIcon('opening_balance')}</div>
+      </th>
+      <th class="p-4 text-right font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none w-44" onclick="setMastersSort('updated_at')">
+        <div class="flex items-center justify-end gap-1.5"><span>Last Synced</span> ${sortIcon('updated_at')}</div>
+      </th>
+    `;
+  } else if (currentTab === "group") {
+    tableHeaderHtml = `
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] w-12">#</th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('name')">
+        <div class="flex items-center gap-1.5"><span>Group Name (Exact in Tally)</span> ${sortIcon('name')}</div>
+      </th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('parent')">
+        <div class="flex items-center gap-1.5"><span>Parent Group</span> ${sortIcon('parent')}</div>
+      </th>
+      <th class="p-4 text-right font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none w-44" onclick="setMastersSort('updated_at')">
+        <div class="flex items-center justify-end gap-1.5"><span>Last Synced</span> ${sortIcon('updated_at')}</div>
+      </th>
+    `;
+  } else if (currentTab === "stock_item") {
+    tableHeaderHtml = `
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] w-12">#</th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('name')">
+        <div class="flex items-center gap-1.5"><span>Stock Item Name</span> ${sortIcon('name')}</div>
+      </th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('parent')">
+        <div class="flex items-center gap-1.5"><span>Category / Group</span> ${sortIcon('parent')}</div>
+      </th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('unit')">
+        <div class="flex items-center gap-1.5"><span>Base Unit</span> ${sortIcon('unit')}</div>
+      </th>
+      <th class="p-4 text-right font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('opening_balance')">
+        <div class="flex items-center justify-end gap-1.5"><span>Opening Balance</span> ${sortIcon('opening_balance')}</div>
+      </th>
+      <th class="p-4 text-right font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none w-44" onclick="setMastersSort('updated_at')">
+        <div class="flex items-center justify-end gap-1.5"><span>Last Synced</span> ${sortIcon('updated_at')}</div>
+      </th>
+    `;
+  } else if (currentTab === "unit") {
+    tableHeaderHtml = `
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] w-12">#</th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('name')">
+        <div class="flex items-center gap-1.5"><span>Symbol / Unit</span> ${sortIcon('name')}</div>
+      </th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('formal_name')">
+        <div class="flex items-center gap-1.5"><span>Formal Name</span> ${sortIcon('formal_name')}</div>
+      </th>
+      <th class="p-4 text-right font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none w-44" onclick="setMastersSort('updated_at')">
+        <div class="flex items-center justify-end gap-1.5"><span>Last Synced</span> ${sortIcon('updated_at')}</div>
+      </th>
+    `;
+  } else if (currentTab === "godown") {
+    tableHeaderHtml = `
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] w-12">#</th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('name')">
+        <div class="flex items-center gap-1.5"><span>Godown Location Name</span> ${sortIcon('name')}</div>
+      </th>
+      <th class="p-4 text-left font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none" onclick="setMastersSort('parent')">
+        <div class="flex items-center gap-1.5"><span>Parent Location</span> ${sortIcon('parent')}</div>
+      </th>
+      <th class="p-4 text-right font-label-caps text-outline uppercase tracking-wider text-[11px] cursor-pointer group select-none w-44" onclick="setMastersSort('updated_at')">
+        <div class="flex items-center justify-end gap-1.5"><span>Last Synced</span> ${sortIcon('updated_at')}</div>
+      </th>
+    `;
+  }
+
+  let rowsHtml = "";
+  if (pageItems.length === 0) {
+    rowsHtml = `
+      <tr>
+        <td colspan="6" class="p-12 text-center">
+          <div class="flex flex-col items-center justify-center space-y-3">
+            <div class="w-16 h-16 rounded-2xl bg-surface-container flex items-center justify-center text-outline/50">
+              <span class="material-symbols-outlined text-[32px]">folder_off</span>
+            </div>
+            <p class="text-sm font-bold text-on-surface">No ${escapeHtml(currentTab.replace('_', ' '))} records found</p>
+            <p class="text-xs text-outline/70 max-w-sm">
+              ${state.mastersSearchQuery ? 'No masters match your search filter "' + escapeHtml(state.mastersSearchQuery) + '".' : 'Click "Sync Masters" above to export records directly from TallyPrime.'}
+            </p>
+          </div>
+        </td>
+      </tr>
+    `;
+  } else {
+    rowsHtml = pageItems.map((item, idx) => {
+      const rowNum = startIndex + idx + 1;
+      const rawDate = item.updated_at ? new Date(item.updated_at) : null;
+      const dateStr = rawDate && !isNaN(rawDate.getTime()) ? rawDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + rawDate.toLocaleDateString() + ')' : "—";
+      
+      if (currentTab === "ledger") {
+        return `
+          <tr class="border-b border-outline-variant/10 hover:bg-primary/5 transition-colors group">
+            <td class="p-4 text-xs font-mono text-outline/60">${rowNum}</td>
+            <td class="p-4 text-xs font-bold text-on-surface font-mono select-all">
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-primary/40 group-hover:bg-primary transition-colors"></span>
+                <span>${escapeHtml(item.name)}</span>
+              </div>
+            </td>
+            <td class="p-4 text-xs text-on-surface-variant font-medium">
+              <span class="px-2.5 py-1 rounded-md bg-surface-container text-on-surface-variant text-[11px] border border-outline-variant/20">
+                ${escapeHtml(item.parent || "Primary")}
+              </span>
+            </td>
+            <td class="p-4 text-xs font-mono font-bold text-right text-on-surface">
+              ${escapeHtml(item.opening_balance || "₹ 0.00")}
+            </td>
+            <td class="p-4 text-xs font-mono text-outline/70 text-right">${dateStr}</td>
+          </tr>
+        `;
+      } else if (currentTab === "group") {
+        return `
+          <tr class="border-b border-outline-variant/10 hover:bg-primary/5 transition-colors group">
+            <td class="p-4 text-xs font-mono text-outline/60">${rowNum}</td>
+            <td class="p-4 text-xs font-bold text-on-surface font-mono select-all">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[16px] text-amber-500">folder</span>
+                <span>${escapeHtml(item.name)}</span>
+              </div>
+            </td>
+            <td class="p-4 text-xs text-on-surface-variant font-medium">
+              <span class="px-2.5 py-1 rounded-md bg-surface-container text-on-surface-variant text-[11px] border border-outline-variant/20">
+                ${escapeHtml(item.parent || "Primary")}
+              </span>
+            </td>
+            <td class="p-4 text-xs font-mono text-outline/70 text-right">${dateStr}</td>
+          </tr>
+        `;
+      } else if (currentTab === "stock_item") {
+        return `
+          <tr class="border-b border-outline-variant/10 hover:bg-primary/5 transition-colors group">
+            <td class="p-4 text-xs font-mono text-outline/60">${rowNum}</td>
+            <td class="p-4 text-xs font-bold text-on-surface font-mono select-all">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[16px] text-indigo-500">inventory_2</span>
+                <span>${escapeHtml(item.name)}</span>
+              </div>
+            </td>
+            <td class="p-4 text-xs text-on-surface-variant font-medium">
+              <span class="px-2.5 py-1 rounded-md bg-surface-container text-on-surface-variant text-[11px] border border-outline-variant/20">
+                ${escapeHtml(item.parent || "Primary")}
+              </span>
+            </td>
+            <td class="p-4 text-xs font-bold text-secondary">
+              ${escapeHtml(item.unit || "—")}
+            </td>
+            <td class="p-4 text-xs font-mono font-bold text-right text-on-surface">
+              ${escapeHtml(item.opening_balance || "—")}
+            </td>
+            <td class="p-4 text-xs font-mono text-outline/70 text-right">${dateStr}</td>
+          </tr>
+        `;
+      } else if (currentTab === "unit") {
+        return `
+          <tr class="border-b border-outline-variant/10 hover:bg-primary/5 transition-colors group">
+            <td class="p-4 text-xs font-mono text-outline/60">${rowNum}</td>
+            <td class="p-4 text-xs font-bold text-on-surface font-mono select-all">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[16px] text-emerald-500">straighten</span>
+                <span>${escapeHtml(item.name)}</span>
+              </div>
+            </td>
+            <td class="p-4 text-xs text-on-surface-variant font-medium">
+              ${escapeHtml(item.formal_name || "—")}
+            </td>
+            <td class="p-4 text-xs font-mono text-outline/70 text-right">${dateStr}</td>
+          </tr>
+        `;
+      } else if (currentTab === "godown") {
+        return `
+          <tr class="border-b border-outline-variant/10 hover:bg-primary/5 transition-colors group">
+            <td class="p-4 text-xs font-mono text-outline/60">${rowNum}</td>
+            <td class="p-4 text-xs font-bold text-on-surface font-mono select-all">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[16px] text-cyan-500">warehouse</span>
+                <span>${escapeHtml(item.name)}</span>
+              </div>
+            </td>
+            <td class="p-4 text-xs text-on-surface-variant font-medium">
+              <span class="px-2.5 py-1 rounded-md bg-surface-container text-on-surface-variant text-[11px] border border-outline-variant/20">
+                ${escapeHtml(item.parent || "Primary")}
+              </span>
+            </td>
+            <td class="p-4 text-xs font-mono text-outline/70 text-right">${dateStr}</td>
+          </tr>
+        `;
+      }
+    }).join("");
+  }
+
+  // Pagination controls
+  const showingStart = total === 0 ? 0 : startIndex + 1;
+  const showingEnd = Math.min(startIndex + pageSize, total);
+
+  let pageButtonsHtml = "";
+  const maxButtons = 5;
+  let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+  let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+  if (endPage - startPage + 1 < maxButtons) {
+    startPage = Math.max(1, endPage - maxButtons + 1);
+  }
+
+  for (let p = startPage; p <= endPage; p++) {
+    const isCur = p === currentPage;
+    pageButtonsHtml += `
+      <button 
+        class="w-8 h-8 rounded-lg text-xs font-bold transition-all ${isCur ? 'bg-primary text-white shadow-md shadow-primary/20' : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface'}"
+        onclick="setMastersPage(${p})">
+        ${p}
+      </button>
+    `;
+  }
+
+  return `
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="border-b border-outline-variant/20 bg-surface-container/30">
+            ${tableHeaderHtml}
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="p-4 border-t border-outline-variant/20 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-outline">
+      <div class="flex items-center gap-2">
+        <span>Showing <strong>${showingStart}</strong> to <strong>${showingEnd}</strong> of <strong>${total}</strong> records</span>
+      </div>
+      
+      <div class="flex items-center gap-1.5">
+        <button 
+          class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant/30 text-xs font-semibold ${currentPage <= 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-container text-on-surface'}"
+          ${currentPage <= 1 ? 'disabled' : ''}
+          onclick="setMastersPage(${currentPage - 1})">
+          <span class="material-symbols-outlined text-[16px]">chevron_left</span>
+          <span>Previous</span>
+        </button>
+
+        <div class="flex items-center gap-1">
+          ${pageButtonsHtml}
+        </div>
+
+        <button 
+          class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant/30 text-xs font-semibold ${currentPage >= totalPages ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-container text-on-surface'}"
+          ${currentPage >= totalPages ? 'disabled' : ''}
+          onclick="setMastersPage(${currentPage + 1})">
+          <span>Next</span>
+          <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function mastersScreen() {
+  const c = state.masters?.counts || {};
+  const activeTab = state.mastersActiveTab || "ledger";
+  const activeComp = state.masters?.activeCompany || state.tally?.company || "Not Detected";
+  const isOnline = Boolean(state.tally?.online);
+  const lastSyncTime = state.masters?.lastSync || state.history?.lastSync;
+  const isSyncing = state.syncingMastersStatus === "syncing";
+
+  const tabs = [
+    { id: "ledger", label: "Ledgers", count: c.ledgers ?? 0, icon: "account_balance_wallet" },
+    { id: "group", label: "Groups", count: c.groups ?? 0, icon: "folder_shared" },
+    { id: "stock_item", label: "Stock Items", count: c.stockItems ?? 0, icon: "inventory_2" },
+    { id: "unit", label: "Units", count: c.units ?? 0, icon: "straighten" },
+    { id: "godown", label: "Godowns", count: c.godowns ?? 0, icon: "warehouse" },
+  ];
+
+  // Sync Status Alert Banner
+  let syncBannerHtml = "";
+  if (isSyncing) {
+    syncBannerHtml = `
+      <div class="p-4 bg-primary/10 border border-primary/20 rounded-2xl flex items-center justify-between text-xs text-primary font-bold animate-pulse">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
+          <span>${escapeHtml(state.syncingMastersMessage || "Synchronizing masters with TallyPrime via Connector queue...")}</span>
+        </div>
+      </div>
+    `;
+  } else if (state.syncingMastersStatus === "done") {
+    syncBannerHtml = `
+      <div class="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between text-xs text-emerald-600 font-bold">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[18px]">check_circle</span>
+          <span>${escapeHtml(state.syncingMastersMessage || "Masters successfully synchronized!")}</span>
+        </div>
+        <button class="text-xs text-emerald-700/60 hover:text-emerald-700 uppercase font-extrabold" onclick="state.syncingMastersStatus='idle'; render();">Dismiss</button>
+      </div>
+    `;
+  } else if (state.syncingMastersStatus === "failed") {
+    syncBannerHtml = `
+      <div class="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-center justify-between text-xs text-rose-600 font-bold">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[18px]">error</span>
+          <span>${escapeHtml(state.syncingMastersMessage || "Master synchronization failed.")}</span>
+        </div>
+        <button class="text-xs text-rose-700/60 hover:text-rose-700 uppercase font-extrabold" onclick="state.syncingMastersStatus='idle'; render();">Dismiss</button>
+      </div>
+    `;
+  }
+
+  return tailwindShell("masters", `
+    <!-- Hero Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div class="space-y-1">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+            <span class="material-symbols-outlined text-[24px]">database</span>
+          </div>
+          <div>
+            <h2 class="text-display-lg font-black text-primary leading-tight">Tally Masters Browser</h2>
+            <p class="text-body-md text-outline/80">Synchronized master databases preserving character-for-character Tally naming.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <!-- Sync Status Pill -->
+        <div class="px-3.5 py-2 rounded-xl glass-pro border border-outline-variant/30 text-xs flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'} animate-pulse"></span>
+          <span class="font-bold text-on-surface">${isOnline ? 'Gateway Active' : 'Gateway Offline'}</span>
+          <span class="text-outline">(${escapeHtml(activeComp)})</span>
+        </div>
+
+        <!-- Sync Masters Action Button -->
+        <button 
+          class="flex items-center gap-2.5 px-6 py-3 rounded-xl bg-primary text-on-primary font-bold hover:shadow-lg hover:shadow-primary/20 transition-all shadow-sm ${isSyncing ? 'opacity-60 cursor-not-allowed' : ''}" 
+          onclick="${isSyncing ? '' : 'syncMastersAction()'}" 
+          ${isSyncing ? 'disabled' : ''}>
+          <span class="material-symbols-outlined text-[20px] ${isSyncing ? 'animate-spin' : ''}">${isSyncing ? 'progress_activity' : 'sync'}</span>
+          <span>${isSyncing ? 'Syncing Masters...' : 'Sync Masters'}</span>
+        </button>
+      </div>
+    </div>
+
+    ${syncBannerHtml}
+
+    <!-- Quick Stat Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      ${tabs.map(t => {
+        const isActive = activeTab === t.id;
+        return `
+          <button 
+            onclick="setMastersTab('${t.id}')"
+            class="p-4 rounded-2xl text-left transition-all border ${isActive ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20 ring-2 ring-primary/20' : 'glass-pro border-outline-variant/20 hover:border-primary/30 text-on-surface'}">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-symbols-outlined text-[20px] ${isActive ? 'text-white' : 'text-primary'}">${t.icon}</span>
+              <span class="text-xs font-extrabold px-2 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-surface-container text-on-surface-variant'}">${t.count}</span>
+            </div>
+            <div class="text-[11px] font-bold uppercase tracking-wider ${isActive ? 'text-white/80' : 'text-outline'}">${t.label}</div>
+            <div class="text-xl font-black mt-0.5">${t.count}</div>
+          </button>
+        `;
+      }).join("")}
+    </div>
+
+    <!-- Master Explorer Box -->
+    <div class="glass-pro rounded-[2rem] border border-outline-variant/30 overflow-hidden shadow-sm space-y-0">
+      <!-- Search and Filter Toolbar -->
+      <div class="p-6 border-b border-outline-variant/20 flex flex-col md:flex-row items-center justify-between gap-4 bg-surface-container/20">
+        <!-- Search bar with inline instant listener -->
+        <div class="relative w-full md:w-96">
+          <span class="material-symbols-outlined absolute left-3.5 top-3 text-[18px] text-outline">search</span>
+          <input 
+            id="masters-search-input"
+            type="text" 
+            class="w-full pl-10 pr-10 py-2.5 rounded-xl border border-outline-variant/40 bg-surface-container-low text-on-surface focus:outline-none focus:ring-2 focus:ring-primary text-xs shadow-inner" 
+            placeholder="Search ${escapeHtml(activeTab.replace('_', ' '))} by name, parent group, or unit..." 
+            value="${escapeHtml(state.mastersSearchQuery || '')}"
+            oninput="setMastersSearch(this.value)"
+          />
+          ${state.mastersSearchQuery ? `
+            <button class="absolute right-3 top-2.5 text-outline hover:text-on-surface" onclick="setMastersSearch('')">
+              <span class="material-symbols-outlined text-[16px]">close</span>
+            </button>
+          ` : ""}
+        </div>
+
+        <!-- Controls: Page Size & Meta -->
+        <div class="flex items-center gap-3 w-full md:w-auto justify-end">
+          <div class="flex items-center gap-2 text-xs text-outline">
+            <span>Show</span>
+            <select 
+              class="bg-surface-container-low border border-outline-variant/40 rounded-lg text-xs py-1 px-2 text-on-surface focus:ring-1 focus:ring-primary font-bold"
+              onchange="setMastersPageSize(this.value)">
+              <option value="10" ${state.mastersPageSize === 10 ? 'selected' : ''}>10</option>
+              <option value="25" ${state.mastersPageSize === 25 ? 'selected' : ''}>25</option>
+              <option value="50" ${state.mastersPageSize === 50 ? 'selected' : ''}>50</option>
+              <option value="100" ${state.mastersPageSize === 100 ? 'selected' : ''}>100</option>
+            </select>
+            <span>entries</span>
+          </div>
+
+          <div class="text-[11px] text-outline border-l border-outline-variant/30 pl-3">
+            Last Synced: <strong class="text-on-surface">${lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString() : 'Never'}</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Dynamic Table Container -->
+      <div id="masters-table-content">
+        ${renderMastersTableContent()}
+      </div>
+    </div>
+  `);
+}
+
+// ------------------------------------------------------------------
+// BANK STATEMENT IMPORT & RECONCILIATION ENGINE (PHASES 2 - 4)
+// ------------------------------------------------------------------
+
+async function loadBankStatementsList() {
+  try {
+    const res = await api("/api/bank-statement/list");
+    if (res && res.statements && res.statements.length > 0 && !state.bankImportStatement) {
+      await loadBankStatementDetails(res.statements[0].id);
+    }
+  } catch (e) {
+    console.warn("Could not load statements list:", e);
+  }
+}
+
+async function loadBankStatementDetails(stmtId) {
+  state.bankImportUploadBusy = true;
+  render();
+  try {
+    const res = await api(`/api/bank-statement/details?id=${encodeURIComponent(stmtId)}`);
+    if (res && res.ok) {
+      state.bankImportStatement = res.statement;
+      state.bankImportTransactions = res.transactions || [];
+      state.bankImportSelectedIds = [];
+      state.bankImportPage = 1;
+      state.bankImportHistoryStack = [];
+    }
+  } catch (e) {
+    setNotice("Failed to load bank statement details: " + e.message);
+  } finally {
+    state.bankImportUploadBusy = false;
+    render();
+  }
+}
+
+async function handleBankPdfUpload(inputEl) {
+  const files = inputEl.files ? Array.from(inputEl.files) : [];
+  if (!files.length) return;
+
+  const bankLedger = state.bankImportTargetLedger || "Bank Accounts";
+  state.bankImportUploadBusy = true;
+  render();
+
+  try {
+    let lastStatement = null;
+    let allNewTransactions = [];
+    let successCount = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (files.length > 1) {
+        setNotice(`Processing PDF ${i + 1} of ${files.length}: ${file.name}...`);
+      }
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`/api/bank-statement/upload?bankLedger=${encodeURIComponent(bankLedger)}`, {
+        method: "POST",
+        body: formData,
+      });
+      const res = await response.json();
+      if (!response.ok || !res.ok) {
+        throw new Error(`[${file.name}] ${res.error || "Failed to parse bank statement PDF"}`);
+      }
+      lastStatement = res.statement;
+      if (Array.isArray(res.transactions)) {
+        allNewTransactions = allNewTransactions.concat(res.transactions);
+      }
+      successCount++;
+    }
+
+    state.bankImportStatement = lastStatement;
+    state.bankImportTransactions = allNewTransactions;
+    state.bankImportSelectedIds = [];
+    state.bankImportPage = 1;
+    state.bankImportHistoryStack = [];
+    if (files.length > 1) {
+      setNotice(`Bulk Import Complete! Successfully processed ${successCount} bank statement PDFs (${allNewTransactions.length} total transactions).`);
+    } else if (lastStatement) {
+      setNotice(`Successfully imported ${lastStatement.row_count} transactions from ${lastStatement.filename}!`);
+    }
+  } catch (err) {
+    setNotice(err.message);
+  } finally {
+    state.bankImportUploadBusy = false;
+    render();
+  }
+}
+
+function getFilteredBankTransactions() {
+  const all = state.bankImportTransactions || [];
+  const q = (state.bankImportSearch || "").trim().toLowerCase();
+  const fType = state.bankImportFilterType || "all";
+  const fLedger = state.bankImportFilterLedgerStatus || "all";
+  const fSend = state.bankImportFilterSendStatus || "all";
+  const minAmt = parseFloat(state.bankImportMinAmount) || 0;
+  const maxAmt = parseFloat(state.bankImportMaxAmount) || Infinity;
+
+  return all.filter((item) => {
+    // 1. Narration search
+    if (q) {
+      const narr = (item.narration || "").toLowerCase();
+      const mode = (item.mode || "").toLowerCase();
+      const leg = (item.assigned_ledger || "").toLowerCase();
+      if (!narr.includes(q) && !mode.includes(q) && !leg.includes(q)) return false;
+    }
+
+    // 2. Type filter
+    if (fType === "deposit" && (item.deposit || 0) <= 0) return false;
+    if (fType === "withdrawal" && (item.withdrawal || 0) <= 0) return false;
+
+    // 3. Ledger status
+    const hasLedger = Boolean(item.assigned_ledger && item.assigned_ledger.trim());
+    if (fLedger === "unassigned" && hasLedger) return false;
+    if (fLedger === "assigned" && (!hasLedger || item.is_locked)) return false;
+    if (fLedger === "locked" && !item.is_locked) return false;
+
+    // 4. Send status
+    const sStatus = item.send_status || "not_sent";
+    if (fSend !== "all" && sStatus !== fSend) return false;
+
+    // 5. Amount filter
+    const amt = (item.deposit || 0) > 0 ? item.deposit : item.withdrawal || 0;
+    if (amt < minAmt || amt > maxAmt) return false;
+
+    return true;
+  });
+}
+
+function pushBankImportHistory() {
+  const snapshot = JSON.stringify(state.bankImportTransactions);
+  state.bankImportHistoryStack.push(snapshot);
+  if (state.bankImportHistoryStack.length > 50) {
+    state.bankImportHistoryStack.shift();
+  }
+}
+
+function undoBankImportAction() {
+  if (!state.bankImportHistoryStack || state.bankImportHistoryStack.length === 0) return;
+  const prevJson = state.bankImportHistoryStack.pop();
+  try {
+    state.bankImportTransactions = JSON.parse(prevJson);
+    renderBankImportTableContainer();
+    setNotice("Reverted last assignment (Undo).");
+  } catch (e) {
+    console.error("Undo failed:", e);
+  }
+}
+
+function toggleSelectAllBankRows(masterCheckbox) {
+  const filtered = getFilteredBankTransactions();
+  if (masterCheckbox.checked) {
+    state.bankImportSelectedIds = filtered.map((t) => t.id);
+  } else {
+    state.bankImportSelectedIds = [];
+  }
+  renderBankImportTableContainer();
+}
+
+function toggleBankRowSelect(id) {
+  const idx = state.bankImportSelectedIds.indexOf(id);
+  if (idx > -1) {
+    state.bankImportSelectedIds.splice(idx, 1);
+  } else {
+    state.bankImportSelectedIds.push(id);
+  }
+  renderBankImportTableContainer();
+}
+
+async function bulkAssignBankLedger(ledgerName, options = {}) {
+  if (!ledgerName || state.bankImportSelectedIds.length === 0) return;
+  pushBankImportHistory();
+
+  const targetIds = [...state.bankImportSelectedIds];
+  const lock = options.lock !== undefined ? options.lock : true;
+  const createRule = Boolean(options.createRule);
+  const rulePattern = options.rulePattern || "";
+
+  // Optimistic UI update
+  for (const t of state.bankImportTransactions) {
+    if (targetIds.includes(t.id)) {
+      t.assigned_ledger = ledgerName;
+      if (lock) t.is_locked = 1;
+    }
+  }
+  renderBankImportTableContainer();
+
+  try {
+    await api("/api/bank-statement/assign", {
+      method: "POST",
+      body: {
+        statementId: state.bankImportStatement.id,
+        transactionIds: targetIds,
+        ledger: ledgerName,
+        lock: lock,
+        createRule: createRule,
+        rulePattern: rulePattern,
+      },
+    });
+  } catch (err) {
+    setNotice("Assignment error: " + err.message);
+  }
+}
+
+async function applyLedgerToMatchingFilter(ledgerName) {
+  if (!ledgerName) return;
+  const filtered = getFilteredBankTransactions();
+  const unlocked = filtered.filter((t) => !t.is_locked);
+  if (unlocked.length === 0) {
+    setNotice("No unlocked transactions match the current filter.");
+    return;
+  }
+  pushBankImportHistory();
+  const targetIds = unlocked.map((t) => t.id);
+
+  for (const t of state.bankImportTransactions) {
+    if (targetIds.includes(t.id)) {
+      t.assigned_ledger = ledgerName;
+      t.is_locked = 1;
+    }
+  }
+  renderBankImportTableContainer();
+
+  try {
+    await api("/api/bank-statement/assign", {
+      method: "POST",
+      body: {
+        statementId: state.bankImportStatement.id,
+        transactionIds: targetIds,
+        ledger: ledgerName,
+        lock: true,
+        createRule: Boolean(state.bankImportSearch),
+        rulePattern: state.bankImportSearch,
+      },
+    });
+    setNotice(`Assigned "${ledgerName}" to ${targetIds.length} transactions and locked!`);
+  } catch (err) {
+    setNotice("Error: " + err.message);
+  }
+}
+
+async function autoMapSuggestedBankLedgers() {
+  const unassignedWithSuggestion = (state.bankImportTransactions || []).filter(
+    (t) => !t.assigned_ledger && t.suggested_ledger && !t.is_locked
+  );
+
+  if (unassignedWithSuggestion.length === 0) {
+    setNotice("No unassigned rows with high-confidence suggestions found.");
+    return;
+  }
+
+  pushBankImportHistory();
+  const updates = [];
+
+  for (const t of unassignedWithSuggestion) {
+    t.assigned_ledger = t.suggested_ledger;
+    t.is_locked = 1;
+    updates.push(t.id);
+  }
+  renderBankImportTableContainer();
+
+  try {
+    await api("/api/bank-statement/assign", {
+      method: "POST",
+      body: {
+        statementId: state.bankImportStatement.id,
+        transactionIds: updates,
+        ledger: "", // will keep assigned_ledger
+        lock: true,
+      },
+    });
+    setNotice(`Auto-mapped and locked ${updates.length} suggested ledgers!`);
+  } catch (err) {
+    setNotice("Auto-map error: " + err.message);
+  }
+}
+
+async function unlockBankRows(targetIds) {
+  if (!targetIds || targetIds.length === 0) return;
+  pushBankImportHistory();
+
+  for (const t of state.bankImportTransactions) {
+    if (targetIds.includes(t.id)) {
+      t.is_locked = 0;
+    }
+  }
+  renderBankImportTableContainer();
+
+  try {
+    await api("/api/bank-statement/unlock", {
+      method: "POST",
+      body: { transactionIds: targetIds },
+    });
+  } catch (e) {
+    setNotice("Unlock error: " + e.message);
+  }
+}
+
+function openNarrationHighlighter(txnId) {
+  const row = (state.bankImportTransactions || []).find((t) => t.id === txnId);
+  if (!row) return;
+  state.bankImportModalRow = row;
+  state.bankImportHighlightedText = "";
+  state.bankImportNewLedgerName = "";
+  state.bankImportNewLedgerGroup = (row.deposit || 0) > 0 ? "Sundry Debtors" : "Indirect Expenses";
+  render();
+}
+
+function closeNarrationHighlighter() {
+  state.bankImportModalRow = null;
+  state.bankImportHighlightedText = "";
+  render();
+}
+
+function captureHighlighterSelection() {
+  const sel = window.getSelection();
+  const text = sel ? sel.toString().trim() : "";
+  if (text) {
+    state.bankImportHighlightedText = text;
+    state.bankImportNewLedgerName = text;
+    const nameInput = document.getElementById("highlighter-ledger-name");
+    if (nameInput) nameInput.value = text;
+  }
+}
+
+async function createLedgerFromHighlighter() {
+  const name = (state.bankImportNewLedgerName || "").trim();
+  const group = state.bankImportNewLedgerGroup || "Sundry Debtors";
+  const row = state.bankImportModalRow;
+  if (!name || !row) {
+    setNotice("Please select or enter a valid ledger name.");
+    return;
+  }
+
+  try {
+    const res = await api("/api/bank-statement/create-ledger", {
+      method: "POST",
+      body: { name, parent: group },
+    });
+
+    if (res && res.ok) {
+      // Refresh masters so the new ledger appears everywhere
+      const refreshedMasters = await api("/api/masters");
+      state.masters = refreshedMasters;
+
+      // Assign to current row and lock
+      await bulkAssignBankLedger(name, {
+        lock: true,
+        createRule: true,
+        rulePattern: state.bankImportHighlightedText || name,
+      });
+
+      closeNarrationHighlighter();
+      setNotice(`Created Tally Ledger "${name}" under "${group}" and assigned!`);
+    } else {
+      setNotice(res?.error || "Failed to create ledger");
+    }
+  } catch (err) {
+    setNotice("Create ledger error: " + err.message);
+  }
+}
+
+async function sendBankVouchersToTally(mode) {
+  if (state.bankImportSendBusy) return;
+
+  const all = state.bankImportTransactions || [];
+  let targets = [];
+
+  if (mode === "test_one") {
+    const candidate = all.find((t) => t.assigned_ledger && t.send_status !== "sent" && (!state.bankImportSelectedIds.length || state.bankImportSelectedIds.includes(t.id)));
+    if (!candidate) {
+      setNotice("No ready transactions found to send for testing.");
+      return;
+    }
+    targets = [candidate.id];
+  } else if (mode === "selected") {
+    targets = state.bankImportSelectedIds.filter((id) => {
+      const t = all.find((item) => item.id === id);
+      return t && t.assigned_ledger && t.send_status !== "sent";
+    });
+    if (targets.length === 0) {
+      setNotice("None of the selected rows have a ledger assigned, or they are already sent.");
+      return;
+    }
+  } else if (mode === "all_ready") {
+    targets = all.filter((t) => t.assigned_ledger && t.send_status !== "sent").map((t) => t.id);
+    if (targets.length === 0) {
+      setNotice("No ready vouchers to dispatch. Please assign ledgers first.");
+      return;
+    }
+    if (!confirm(`Confirm dispatching ${targets.length} vouchers to ${state.masters.activeCompany || state.tally.company || "TallyPrime"}?`)) {
+      return;
+    }
+  }
+
+  state.bankImportSendBusy = true;
+  render();
+
+  try {
+    const res = await api("/api/bank-statement/send-tally", {
+      method: "POST",
+      body: {
+        statementId: state.bankImportStatement.id,
+        transactionIds: targets,
+        username: "guest-01",
+      },
+    });
+
+    if (res && res.ok) {
+      // Mark queued
+      for (const t of state.bankImportTransactions) {
+        if (targets.includes(t.id)) {
+          t.send_status = "queued";
+        }
+      }
+      setNotice(`Enqueued ${res.queued} vouchers on desktop connector! Tally is importing...`);
+    } else {
+      setNotice(res?.error || "Failed to queue vouchers.");
+    }
+  } catch (e) {
+    setNotice("Dispatch error: " + e.message);
+  } finally {
+    state.bankImportSendBusy = false;
+    render();
+  }
+}
+
+function renderBankImportTableContainer() {
+  const container = document.getElementById("bank-import-table-container");
+  if (container) {
+    container.innerHTML = renderBankTransactionsTable();
+  } else {
+    render();
+  }
+}
+
+function renderBankTransactionsTable() {
+  const allTxns = state.bankImportTransactions || [];
+  const filtered = getFilteredBankTransactions();
+  const total = filtered.length;
+  const pageSize = state.bankImportPageSize || 25;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(Math.max(1, state.bankImportPage || 1), totalPages);
+  const startIndex = (currentPage - 1) * pageSize;
+  const pageItems = filtered.slice(startIndex, startIndex + pageSize);
+
+  const isOnline = Boolean(state.tally?.online);
+  const allLedgers = (state.masters?.masters || []).filter((m) => m.type === "ledger" || m.type === "gst_ledger");
+
+  const isAllPageSelected = pageItems.length > 0 && pageItems.every((item) => state.bankImportSelectedIds.includes(item.id));
+
+  let rowsHtml = "";
+  if (pageItems.length === 0) {
+    rowsHtml = `
+      <tr>
+        <td colspan="10" class="p-12 text-center">
+          <div class="flex flex-col items-center justify-center space-y-2">
+            <span class="material-symbols-outlined text-outline/40 text-[36px]">filter_alt_off</span>
+            <p class="text-sm font-bold text-on-surface">No transactions match current filters</p>
+            <button class="text-xs text-primary font-bold hover:underline" onclick="state.bankImportSearch=''; state.bankImportFilterType='all'; state.bankImportFilterLedgerStatus='all'; state.bankImportFilterSendStatus='all'; state.bankImportMinAmount=''; state.bankImportMaxAmount=''; renderBankImportTableContainer();">Clear All Filters</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  } else {
+    rowsHtml = pageItems
+      .map((item) => {
+        const isSelected = state.bankImportSelectedIds.includes(item.id);
+        const isLocked = Boolean(item.is_locked);
+        const isDep = (item.deposit || 0) > 0;
+        const amt = isDep ? item.deposit : item.withdrawal || 0;
+
+        // Readiness calculation
+        let readinessBadge = "";
+        if (item.send_status === "sent") {
+          readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center gap-1 w-max"><span class="material-symbols-outlined text-[13px]">check</span>Sent</span>`;
+        } else if (item.send_status === "failed") {
+          readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1 w-max" title="${escapeHtml(item.send_error || "Tally Rejected")}"><span class="material-symbols-outlined text-[13px]">error</span>Failed</span>`;
+        } else if (item.send_status === "queued") {
+          readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1 w-max"><span class="material-symbols-outlined text-[13px] animate-spin">sync</span>Queued</span>`;
+        } else if (item.assigned_ledger && isOnline) {
+          readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1 w-max"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>Ready</span>`;
+        } else if (item.assigned_ledger && !isOnline) {
+          readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1 w-max" title="Tally or Connector offline"><span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>Offline</span>`;
+        } else {
+          readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1 w-max" title="No Tally ledger assigned"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Unassigned</span>`;
+        }
+
+        const vTypeClass = item.voucher_type === "Receipt" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" : item.voucher_type === "Contra" ? "text-amber-400 bg-amber-500/10 border-amber-500/20" : "text-blue-400 bg-blue-500/10 border-blue-500/20";
+
+        // Highlight matched query in narration
+        let formattedNarration = escapeHtml(item.narration);
+        if (state.bankImportSearch && state.bankImportSearch.trim()) {
+          const reg = new RegExp(`(${state.bankImportSearch.trim()})`, "gi");
+          formattedNarration = formattedNarration.replace(reg, `<mark class="bg-primary/30 text-primary font-bold px-0.5 rounded">$1</mark>`);
+        }
+
+        return `
+          <tr class="border-b border-outline-variant/10 transition-colors ${isSelected ? "bg-primary/10" : isLocked ? "bg-white/[0.02]" : "hover:bg-white/[0.03]"}">
+            <td class="p-3 text-center">
+              <input type="checkbox" class="w-4 h-4 rounded border-outline-variant/40 bg-surface-container text-primary focus:ring-primary cursor-pointer" ${isSelected ? "checked" : ""} onchange="toggleBankRowSelect('${item.id}')" />
+            </td>
+            <td class="p-3 text-xs font-mono text-outline/80 whitespace-nowrap">${escapeHtml(item.date)}</td>
+            <td class="p-3">
+              <span class="px-2 py-0.5 rounded text-[10px] font-extrabold border ${vTypeClass}">${escapeHtml(item.voucher_type || (isDep ? "Receipt" : "Payment"))}</span>
+            </td>
+            <td class="p-3 text-xs text-on-surface cursor-pointer group" onclick="openNarrationHighlighter('${item.id}')" title="Click to open highlighter & create ledger">
+              <div class="max-w-md line-clamp-2 font-mono text-[11px] group-hover:text-primary transition-colors flex items-start gap-1">
+                <span>${formattedNarration}</span>
+                <span class="material-symbols-outlined text-[13px] opacity-0 group-hover:opacity-100 text-primary shrink-0">edit_note</span>
+              </div>
+            </td>
+            <td class="p-3 text-xs font-mono font-bold text-right ${isDep ? "text-emerald-400" : "text-outline/30"}">
+              ${isDep ? `₹ ${item.deposit.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—"}
+            </td>
+            <td class="p-3 text-xs font-mono font-bold text-right ${!isDep ? "text-rose-400" : "text-outline/30"}">
+              ${!isDep ? `₹ ${item.withdrawal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—"}
+            </td>
+            <td class="p-3 text-xs font-mono text-outline/70 text-right whitespace-nowrap">
+              ${item.balance ? `₹ ${item.balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—"}
+              ${item.balance_mismatch ? `<span class="material-symbols-outlined text-[14px] text-rose-500 inline-block align-middle ml-1" title="Running balance discrepancy detected on this statement row">warning</span>` : ""}
+            </td>
+            <td class="p-3">
+              <div class="relative flex items-center gap-1">
+                <select 
+                  class="bg-surface-container-low border ${isLocked ? "border-emerald-500/40 text-emerald-300" : "border-outline-variant/40 text-on-surface"} rounded-lg text-xs py-1 px-2 focus:ring-1 focus:ring-primary w-48 truncate"
+                  ${isLocked ? "disabled" : ""}
+                  onchange="bulkAssignBankLedger(this.value, { lock: true })"
+                  onclick="state.bankImportSelectedIds = ['${item.id}']">
+                  <option value="">${item.assigned_ledger ? escapeHtml(item.assigned_ledger) : item.suggested_ledger ? `Auto: ${escapeHtml(item.suggested_ledger)}` : "-- Assign Ledger --"}</option>
+                  ${allLedgers.map((l) => `<option value="${escapeHtml(l.name)}" ${item.assigned_ledger === l.name ? "selected" : ""}>${escapeHtml(l.name)}</option>`).join("")}
+                </select>
+                ${isLocked ? `<button class="p-1 text-outline hover:text-rose-400" onclick="unlockBankRows(['${item.id}'])" title="Unlock row"><span class="material-symbols-outlined text-[16px]">lock</span></button>` : `<button class="p-1 text-primary hover:text-primary-fixed" onclick="openNarrationHighlighter('${item.id}')" title="Create New Ledger"><span class="material-symbols-outlined text-[16px]">add_circle</span></button>`}
+              </div>
+            </td>
+            <td class="p-3">${readinessBadge}</td>
+            <td class="p-3 text-right">
+              ${item.assigned_ledger && item.send_status !== "sent" ? `<button class="px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary hover:text-white text-[10px] font-bold uppercase transition-all" onclick="state.bankImportSelectedIds=['${item.id}']; sendBankVouchersToTally('selected')">Send</button>` : ""}
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  // Pagination Footer
+  const showingStart = total === 0 ? 0 : startIndex + 1;
+  const showingEnd = Math.min(startIndex + pageSize, total);
+
+  return `
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="border-b border-outline-variant/20 bg-surface-container/30 text-[11px] font-label-caps text-outline uppercase tracking-wider">
+            <th class="p-3 text-center w-10">
+              <input type="checkbox" class="w-4 h-4 rounded border-outline-variant/40 bg-surface-container text-primary cursor-pointer" ${isAllPageSelected ? "checked" : ""} onchange="toggleSelectAllBankRows(this)" />
+            </th>
+            <th class="p-3">Date</th>
+            <th class="p-3">Type</th>
+            <th class="p-3">Particulars (Narration)</th>
+            <th class="p-3 text-right">Deposit</th>
+            <th class="p-3 text-right">Withdrawal</th>
+            <th class="p-3 text-right">Balance</th>
+            <th class="p-3">Assigned Ledger</th>
+            <th class="p-3">Status</th>
+            <th class="p-3 text-right">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="p-4 border-t border-outline-variant/20 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-outline">
+      <div>
+        <span>Showing <strong>${showingStart}</strong> to <strong>${showingEnd}</strong> of <strong>${total}</strong> records</span>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <button 
+          class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant/30 text-xs font-semibold ${currentPage <= 1 ? "opacity-40 cursor-not-allowed" : "hover:bg-surface-container text-on-surface"}"
+          ${currentPage <= 1 ? "disabled" : ""}
+          onclick="state.bankImportPage=${currentPage - 1}; renderBankImportTableContainer();">
+          <span class="material-symbols-outlined text-[16px]">chevron_left</span>
+          <span>Previous</span>
+        </button>
+
+        <span class="px-3 py-1 font-bold text-on-surface">Page ${currentPage} of ${totalPages}</span>
+
+        <button 
+          class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant/30 text-xs font-semibold ${currentPage >= totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-surface-container text-on-surface"}"
+          ${currentPage >= totalPages ? "disabled" : ""}
+          onclick="state.bankImportPage=${currentPage + 1}; renderBankImportTableContainer();">
+          <span>Next</span>
+          <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function bankHighlighterModal() {
+  if (!state.bankImportModalRow) return "";
+  const row = state.bankImportModalRow;
+  const groups = [
+    "Sundry Debtors",
+    "Sundry Creditors",
+    "Direct Expenses",
+    "Indirect Expenses",
+    "Direct Incomes",
+    "Indirect Incomes",
+    "Bank Accounts",
+    "Cash-in-hand",
+    "Current Assets",
+    "Current Liabilities",
+  ];
+
+  return `
+    <div class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="glass-pro rounded-[2rem] border border-outline-variant/30 max-w-xl w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in-95">
+        <div class="flex items-center justify-between border-b border-outline-variant/20 pb-4">
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-primary/20 text-primary flex items-center justify-center">
+              <span class="material-symbols-outlined text-[20px]">brush</span>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-on-surface">Highlight Narration to Make Ledger</h3>
+              <p class="text-xs text-outline">Select any text with your mouse below to automatically create or map it.</p>
+            </div>
+          </div>
+          <button class="text-outline hover:text-on-surface" onclick="closeNarrationHighlighter()">
+            <span class="material-symbols-outlined text-[20px]">close</span>
+          </button>
+        </div>
+
+        <!-- Highlighting Box -->
+        <div class="space-y-1.5">
+          <label class="text-[11px] font-label-caps text-outline uppercase tracking-wider">Full Narration Text (Select with mouse):</label>
+          <div 
+            class="p-4 rounded-xl bg-surface-container-low border border-primary/30 font-mono text-xs text-on-surface select-text cursor-text leading-relaxed tracking-wide shadow-inner"
+            onmouseup="captureHighlighterSelection()">
+            ${escapeHtml(row.narration)}
+          </div>
+        </div>
+
+        ${
+          state.bankImportHighlightedText
+            ? `
+          <div class="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[18px]">check</span>
+            <span>Selected text: <strong>"${escapeHtml(state.bankImportHighlightedText)}"</strong></span>
+          </div>
+        `
+            : ""
+        }
+
+        <!-- Ledger Creation Form -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="space-y-1">
+            <label class="text-[11px] font-label-caps text-outline uppercase tracking-wider">Tally Ledger Name:</label>
+            <input 
+              id="highlighter-ledger-name"
+              type="text" 
+              class="w-full bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary font-mono"
+              placeholder="e.g. Acme Corporation" 
+              value="${escapeHtml(state.bankImportNewLedgerName || "")}"
+              oninput="state.bankImportNewLedgerName = this.value"
+            />
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-[11px] font-label-caps text-outline uppercase tracking-wider">Parent Group:</label>
+            <select 
+              class="w-full bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary"
+              onchange="state.bankImportNewLedgerGroup = this.value">
+              ${groups.map((g) => `<option value="${g}" ${state.bankImportNewLedgerGroup === g ? "selected" : ""}>${g}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-4 border-t border-outline-variant/20">
+          <button class="px-4 py-2 rounded-xl text-xs font-bold text-outline hover:text-on-surface" onclick="closeNarrationHighlighter()">Cancel</button>
+          <button class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-bold hover:shadow-lg hover:shadow-primary/20 transition-all flex items-center gap-2" onclick="createLedgerFromHighlighter()">
+            <span class="material-symbols-outlined text-[16px]">save</span>
+            <span>Create & Assign</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bankImportScreen() {
+  const isOnline = Boolean(state.tally?.online);
+  const activeComp = state.masters?.activeCompany || state.tally?.company || "Not Detected";
+  const stmt = state.bankImportStatement;
+  const allTxns = state.bankImportTransactions || [];
+
+  // Bank ledgers dropdown options
+  const bankLedgers = (state.masters?.masters || []).filter((m) => m.type === "ledger" && (m.parent.toLowerCase().includes("bank") || m.name.toLowerCase().includes("bank")));
+
+  // Metrics
+  const totalCount = allTxns.length;
+  const assignedCount = allTxns.filter((t) => t.assigned_ledger).length;
+  const progressPercent = totalCount > 0 ? Math.round((assignedCount / totalCount) * 100) : 0;
+
+  const readyCount = allTxns.filter((t) => t.assigned_ledger && t.send_status !== "sent" && isOnline).length;
+  const waitingCount = allTxns.filter((t) => !t.assigned_ledger).length;
+  const sentCount = allTxns.filter((t) => t.send_status === "sent").length;
+  const failedCount = allTxns.filter((t) => t.send_status === "failed").length;
+
+  const allLedgers = (state.masters?.masters || []).filter((m) => m.type === "ledger" || m.type === "gst_ledger");
+
+  return tailwindShell(
+    "bank_import",
+    `
+    <!-- Hero Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div class="space-y-1">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+            <span class="material-symbols-outlined text-[24px]">receipt_long</span>
+          </div>
+          <div>
+            <h2 class="text-display-lg font-black text-primary leading-tight">Bank Statement Import</h2>
+            <p class="text-body-md text-outline/80">Universal multi-bank PDF parsing, regex learning, and instant Tally voucher reconciliation.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top Status Indicators -->
+      <div class="flex items-center gap-3">
+        <div class="px-3.5 py-2 rounded-xl glass-pro border border-outline-variant/30 text-xs flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full ${isOnline ? "bg-emerald-500" : "bg-rose-500"} animate-pulse"></span>
+          <span class="font-bold text-on-surface">${isOnline ? "Gateway Connected" : "Gateway Offline"}</span>
+          <span class="text-outline">(${escapeHtml(activeComp)})</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tier 1: KPIs & Connection Summary -->
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div class="glass-pro p-4 rounded-2xl border border-outline-variant/20">
+        <div class="text-[10px] font-bold text-outline uppercase tracking-wider">Total Records</div>
+        <div class="text-2xl font-black text-on-surface mt-1">${totalCount}</div>
+      </div>
+      <div class="glass-pro p-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/5">
+        <div class="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Ready to Dispatch
+        </div>
+        <div class="text-2xl font-black text-emerald-400 mt-1">${readyCount}</div>
+      </div>
+      <div class="glass-pro p-4 rounded-2xl border border-amber-500/20 bg-amber-500/5">
+        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Unassigned
+        </div>
+        <div class="text-2xl font-black text-amber-400 mt-1">${waitingCount}</div>
+      </div>
+      <div class="glass-pro p-4 rounded-2xl border border-blue-500/20 bg-blue-500/5">
+        <div class="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>Imported in Tally
+        </div>
+        <div class="text-2xl font-black text-blue-400 mt-1">${sentCount}</div>
+      </div>
+      <div class="glass-pro p-4 rounded-2xl border border-rose-500/20 bg-rose-500/5">
+        <div class="text-[10px] font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>Failed Rows
+        </div>
+        <div class="text-2xl font-black text-rose-400 mt-1">${failedCount}</div>
+      </div>
+    </div>
+
+    <!-- Step 1: Upload Dropzone & Statement Banner -->
+    <div class="glass-pro p-6 rounded-[2rem] border border-outline-variant/30 space-y-4">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-bold text-outline">Target Bank Ledger in Tally:</span>
+          <select 
+            class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-1.5 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary min-w-[200px]"
+            onchange="state.bankImportTargetLedger = this.value">
+            <option value="Bank Accounts">Select Bank Ledger</option>
+            ${bankLedgers.map((b) => `<option value="${escapeHtml(b.name)}" ${state.bankImportTargetLedger === b.name ? "selected" : ""}>${escapeHtml(b.name)}</option>`).join("")}
+          </select>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <input 
+            id="bank-pdf-input"
+            type="file" 
+            accept=".pdf" 
+            multiple
+            class="hidden" 
+            onchange="handleBankPdfUpload(this)"
+          />
+          <button 
+            class="px-5 py-2.5 rounded-xl bg-primary text-white text-xs font-bold hover:shadow-lg hover:shadow-primary/20 transition-all flex items-center gap-2 ${state.bankImportUploadBusy ? "opacity-50 cursor-not-allowed" : ""}"
+            onclick="document.getElementById('bank-pdf-input').click()"
+            ${state.bankImportUploadBusy ? "disabled" : ""}>
+            <span class="material-symbols-outlined text-[18px] ${state.bankImportUploadBusy ? "animate-spin" : ""}">
+              ${state.bankImportUploadBusy ? "progress_activity" : "upload_file"}
+            </span>
+            <span>${state.bankImportUploadBusy ? "Parsing PDF with Coordinates..." : "Upload Bank Statements (Single / Bulk PDF)"}</span>
+          </button>
+        </div>
+      </div>
+
+      ${
+        stmt
+          ? `
+        <!-- Loaded Statement Info Bar -->
+        <div class="p-4 bg-surface-container/40 rounded-2xl border border-outline-variant/20 flex flex-wrap items-center justify-between gap-4 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-primary text-[20px]">description</span>
+            <span class="font-bold text-on-surface">${escapeHtml(stmt.filename)}</span>
+            <span class="text-outline">(${stmt.row_count} rows)</span>
+          </div>
+
+          <div class="flex items-center gap-4 text-xs font-mono">
+            <div>Opening: <strong class="text-on-surface">₹ ${stmt.opening_balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong></div>
+            <div>Deposits: <strong class="text-emerald-400">+ ₹ ${stmt.total_deposits.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong></div>
+            <div>Withdrawals: <strong class="text-rose-400">- ₹ ${stmt.total_withdrawals.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong></div>
+            <div>Closing: <strong class="text-primary">₹ ${stmt.closing_balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong></div>
+          </div>
+        </div>
+      `
+          : ""
+      }
+    </div>
+
+    <!-- Step 2: Reconciliation Workflow Toolbar -->
+    <div class="glass-pro p-5 rounded-[2rem] border border-outline-variant/30 space-y-4">
+      <!-- Progress Bar & Actions -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div class="flex-1 max-w-md space-y-1.5">
+          <div class="flex justify-between text-xs font-bold">
+            <span class="text-outline">Reconciliation Progress</span>
+            <span class="text-primary font-mono">${progressPercent}% (${assignedCount}/${totalCount})</span>
+          </div>
+          <div class="w-full h-2 rounded-full bg-surface-container overflow-hidden">
+            <div class="h-full bg-primary transition-all duration-300" style="width: ${progressPercent}%"></div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2.5">
+          <button 
+            class="px-3.5 py-1.5 rounded-xl border border-outline-variant/40 text-xs font-bold hover:bg-surface-container text-on-surface flex items-center gap-1.5 ${state.bankImportFilterLedgerStatus === "unassigned" ? "bg-primary/10 text-primary border-primary/30" : ""}"
+            onclick="state.bankImportFilterLedgerStatus = state.bankImportFilterLedgerStatus === 'unassigned' ? 'all' : 'unassigned'; renderBankImportTableContainer();">
+            <span class="material-symbols-outlined text-[16px]">visibility</span>
+            <span>${state.bankImportFilterLedgerStatus === "unassigned" ? "Showing Unassigned" : "Show Unassigned Only"}</span>
+          </button>
+
+          <button 
+            class="px-3.5 py-1.5 rounded-xl border border-outline-variant/40 text-xs font-bold hover:bg-surface-container text-on-surface flex items-center gap-1.5"
+            onclick="undoBankImportAction()">
+            <span class="material-symbols-outlined text-[16px]">undo</span>
+            <span>Undo (Ctrl+Z)</span>
+          </button>
+
+          <button 
+            class="px-3.5 py-1.5 rounded-xl bg-primary/20 text-primary border border-primary/30 text-xs font-bold hover:bg-primary hover:text-white transition-all flex items-center gap-1.5"
+            onclick="autoMapSuggestedBankLedgers()">
+            <span class="material-symbols-outlined text-[16px]">auto_fix_high</span>
+            <span>Auto-Map Suggestions</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Multi-Criteria Filter Bar -->
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-3 border-t border-outline-variant/20">
+        <!-- Narration Search -->
+        <div class="relative sm:col-span-2">
+          <span class="material-symbols-outlined absolute left-3 top-2.5 text-[18px] text-outline">search</span>
+          <input 
+            type="text" 
+            class="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant/40 bg-surface-container-low text-xs text-on-surface focus:ring-1 focus:ring-primary shadow-inner"
+            placeholder="Search Narration (e.g. UPI, SHINE HAIR, NEFT, CASH)..."
+            value="${escapeHtml(state.bankImportSearch || "")}"
+            oninput="state.bankImportSearch = this.value; renderBankImportTableContainer();"
+          />
+        </div>
+
+        <!-- Type Filter -->
+        <select 
+          class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary"
+          onchange="state.bankImportFilterType = this.value; renderBankImportTableContainer();">
+          <option value="all" ${state.bankImportFilterType === "all" ? "selected" : ""}>All Types (Deposits & Withdrawals)</option>
+          <option value="deposit" ${state.bankImportFilterType === "deposit" ? "selected" : ""}>Deposits Only (+)</option>
+          <option value="withdrawal" ${state.bankImportFilterType === "withdrawal" ? "selected" : ""}>Withdrawals Only (-)</option>
+        </select>
+
+        <!-- Status Filter -->
+        <select 
+          class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary"
+          onchange="state.bankImportFilterLedgerStatus = this.value; renderBankImportTableContainer();">
+          <option value="all" ${state.bankImportFilterLedgerStatus === "all" ? "selected" : ""}>All Ledger States</option>
+          <option value="unassigned" ${state.bankImportFilterLedgerStatus === "unassigned" ? "selected" : ""}>Unassigned Only</option>
+          <option value="assigned" ${state.bankImportFilterLedgerStatus === "assigned" ? "selected" : ""}>Assigned (Unlocked)</option>
+          <option value="locked" ${state.bankImportFilterLedgerStatus === "locked" ? "selected" : ""}>Locked Only</option>
+        </select>
+      </div>
+
+      ${
+        state.bankImportSelectedIds.length > 0
+          ? `
+        <!-- Floating Bulk Action Toolbar -->
+        <div class="p-3 bg-primary/10 border border-primary/30 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs animate-in fade-in">
+          <div class="flex items-center gap-2 text-primary font-bold">
+            <span class="material-symbols-outlined text-[18px]">check_box</span>
+            <span>${state.bankImportSelectedIds.length} transactions selected</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <select 
+              id="bulk-ledger-select"
+              class="bg-surface-container-low border border-primary/40 rounded-xl px-3 py-1.5 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary min-w-[200px]">
+              <option value="">Select Ledger to Assign</option>
+              ${allLedgers.map((l) => `<option value="${escapeHtml(l.name)}">${escapeHtml(l.name)}</option>`).join("")}
+            </select>
+
+            <button 
+              class="px-4 py-1.5 rounded-xl bg-primary text-white font-bold hover:shadow-md hover:shadow-primary/20 transition-all"
+              onclick="const val = document.getElementById('bulk-ledger-select').value; if (val) bulkAssignBankLedger(val, { lock: true });">
+              Assign & Lock
+            </button>
+
+            ${
+              state.bankImportSearch
+                ? `
+              <button 
+                class="px-3 py-1.5 rounded-xl bg-surface-container border border-outline-variant/40 text-on-surface font-bold hover:bg-white/10"
+                onclick="const val = document.getElementById('bulk-ledger-select').value; if (val) applyLedgerToMatchingFilter(val);"
+                title="Assign to all rows matching the search '${escapeHtml(state.bankImportSearch)}' and remember rule">
+                Apply to All Filtered
+              </button>
+            `
+                : ""
+            }
+
+            <button 
+              class="px-3 py-1.5 rounded-xl border border-outline-variant/40 text-outline hover:text-rose-400"
+              onclick="unlockBankRows(state.bankImportSelectedIds)">
+              Unlock Selected
+            </button>
+          </div>
+        </div>
+      `
+          : ""
+      }
+    </div>
+
+    <!-- Step 3: Interactive Table Container -->
+    <div class="glass-pro rounded-[2rem] border border-outline-variant/30 overflow-hidden shadow-sm">
+      <div id="bank-import-table-container">
+        ${renderBankTransactionsTable()}
+      </div>
+    </div>
+
+    <!-- Step 4: Bottom Send to Tally Action Bar -->
+    <div class="glass-pro p-6 rounded-[2rem] border border-outline-variant/30 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="text-xs text-outline">
+        <span>Ready vouchers will be converted to standard Tally XML and dispatched sequentially via the desktop connector.</span>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button 
+          class="px-4 py-2.5 rounded-xl border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container transition-all ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
+          onclick="sendBankVouchersToTally('test_one')"
+          ${state.bankImportSendBusy ? "disabled" : ""}>
+          Send 1 for Testing
+        </button>
+
+        ${
+          state.bankImportSelectedIds.length > 0
+            ? `
+          <button 
+            class="px-5 py-2.5 rounded-xl bg-primary/20 text-primary border border-primary/30 text-xs font-bold hover:bg-primary hover:text-white transition-all ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
+            onclick="sendBankVouchersToTally('selected')"
+            ${state.bankImportSendBusy ? "disabled" : ""}>
+            Send Selected (${state.bankImportSelectedIds.length})
+          </button>
+        `
+            : ""
+        }
+
+        <button 
+          class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-bold hover:shadow-lg hover:shadow-primary/20 transition-all flex items-center gap-2 ${state.bankImportSendBusy || readyCount === 0 ? "opacity-50 cursor-not-allowed" : ""}"
+          onclick="sendBankVouchersToTally('all_ready')"
+          ${state.bankImportSendBusy || readyCount === 0 ? "disabled" : ""}>
+          <span class="material-symbols-outlined text-[18px] ${state.bankImportSendBusy ? "animate-spin" : ""}">
+            ${state.bankImportSendBusy ? "progress_activity" : "send"}
+          </span>
+          <span>${state.bankImportSendBusy ? "Dispatching to Tally..." : `Send All Ready (${readyCount})`}</span>
+        </button>
+      </div>
+    </div>
+  `
+  );
+}
+
+
 function automation() {
   state.activeWorkflow = state.activeWorkflow || "Purchase";
   state.automationFilter = state.automationFilter || "All Workflows";
@@ -3603,6 +5197,23 @@ function upload() {
   return tailwindShell("upload", `
     <input id="fileInput" type="file" accept=".xlsx,.xls" style="display:none" onchange="uploadExcel(this.files[0])" />
     
+    <!-- Upload Category Mode Switcher -->
+    <div class="flex flex-col sm:flex-row items-center justify-between p-3 bg-surface-container/60 rounded-2xl border border-outline-variant/30 mb-8 gap-3">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-bold text-outline uppercase tracking-wider px-2">Upload Format:</span>
+        <button class="px-5 py-2.5 rounded-xl text-xs font-bold transition-all bg-primary text-white shadow-sm flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-[18px]">table_view</span>
+          <span>Excel Templates (.xlsx / .xls)</span>
+        </button>
+        <button class="px-5 py-2.5 rounded-xl text-xs font-bold transition-all bg-surface-container hover:bg-primary/10 text-on-surface hover:text-primary border border-outline-variant/40 flex items-center gap-1.5" onclick="go('bank_import')">
+          <span class="material-symbols-outlined text-[18px] text-emerald-500">receipt_long</span>
+          <span>Bank Statement PDF (Single & Bulk PDF)</span>
+          <span class="ml-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 text-[10px] font-bold">Recommended</span>
+        </button>
+      </div>
+      <div class="text-xs text-outline font-medium px-2">Supports any bank PDF or accounting Excel</div>
+    </div>
+
     <div class="grid grid-cols-12 gap-8">
       <!-- Left: Primary Upload & Health -->
       <div class="col-span-12 lg:col-span-8 space-y-8">
@@ -6349,7 +7960,7 @@ function render(route = state.route) {
     }
   }
   state.route = targetRoute;
-  const views = { auth, plans, login, dashboard, sync: syncScreen, automation, upload, mapping, success };
+  const views = { auth, plans, login, dashboard, masters: mastersScreen, bank_import: bankImportScreen, sync: syncScreen, automation, upload, mapping, success };
   
   // Render Notice Banner inside canvas if it exists
   const noticeBannerHtml = state.notice ? `
@@ -6367,10 +7978,19 @@ function render(route = state.route) {
   } else {
     // Inject notice banner inside the app's views dynamically, or keep it standard.
     // In our tailwindShell we place state.notice, so let's render standard.
-    document.getElementById("app").innerHTML = views[state.route]() + createLedgerModal() + alterLedgerModal();
+    document.getElementById("app").innerHTML = views[state.route]() + createLedgerModal() + alterLedgerModal() + (typeof bankHighlighterModal === "function" ? bankHighlighterModal() : "");
   }
   document.title = `${screens[state.route].title} - Tally Automation`;
 }
+
+window.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+    if (state.route === "bank_import" && state.bankImportHistoryStack && state.bankImportHistoryStack.length > 0) {
+      e.preventDefault();
+      undoBankImportAction();
+    }
+  }
+});
 
 window.addEventListener("hashchange", () => {
   const nextRoute = (location.hash || "#auth").replace("#", "");

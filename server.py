@@ -267,6 +267,9 @@ def init_db() -> None:
               type TEXT NOT NULL,
               name TEXT NOT NULL,
               parent TEXT,
+              opening_balance TEXT DEFAULT '',
+              unit TEXT DEFAULT '',
+              formal_name TEXT DEFAULT '',
               raw_xml TEXT,
               updated_at TEXT NOT NULL,
               UNIQUE(type, name)
@@ -322,6 +325,45 @@ def init_db() -> None:
               raw_xml TEXT,
               updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS bank_statements (
+              id TEXT PRIMARY KEY,
+              filename TEXT NOT NULL,
+              bank_ledger TEXT NOT NULL,
+              opening_balance REAL DEFAULT 0.0,
+              closing_balance REAL DEFAULT 0.0,
+              total_deposits REAL DEFAULT 0.0,
+              total_withdrawals REAL DEFAULT 0.0,
+              row_count INTEGER DEFAULT 0,
+              created_at TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'imported'
+            );
+            CREATE TABLE IF NOT EXISTS bank_transactions (
+              id TEXT PRIMARY KEY,
+              statement_id TEXT NOT NULL,
+              row_no INTEGER NOT NULL,
+              date TEXT NOT NULL,
+              mode TEXT DEFAULT '',
+              narration TEXT NOT NULL,
+              deposit REAL DEFAULT 0.0,
+              withdrawal REAL DEFAULT 0.0,
+              balance REAL DEFAULT 0.0,
+              voucher_type TEXT NOT NULL DEFAULT 'Payment',
+              assigned_ledger TEXT DEFAULT '',
+              is_locked INTEGER NOT NULL DEFAULT 0,
+              send_status TEXT NOT NULL DEFAULT 'not_sent',
+              send_error TEXT DEFAULT '',
+              tally_guid TEXT DEFAULT '',
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY(statement_id) REFERENCES bank_statements(id)
+            );
+            CREATE TABLE IF NOT EXISTS ledger_rules (
+              id TEXT PRIMARY KEY,
+              company TEXT NOT NULL,
+              pattern TEXT NOT NULL,
+              target_ledger TEXT NOT NULL,
+              target_group TEXT NOT NULL DEFAULT 'Sundry Debtors',
+              created_at TEXT NOT NULL
+            );
             """
         )
         ensure_column(conn, "upload_batches", "entry_type", "TEXT NOT NULL DEFAULT 'Excel Upload'")
@@ -354,6 +396,15 @@ def init_db() -> None:
         ensure_column(conn, "synced_vouchers", "persisted_view", "TEXT")
         ensure_column(conn, "synced_vouchers", "raw_xml", "TEXT")
         ensure_column(conn, "synced_vouchers", "updated_at", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "masters", "opening_balance", "TEXT DEFAULT ''")
+        ensure_column(conn, "masters", "unit", "TEXT DEFAULT ''")
+        ensure_column(conn, "masters", "formal_name", "TEXT DEFAULT ''")
+        ensure_column(conn, "bank_transactions", "voucher_type", "TEXT NOT NULL DEFAULT 'Payment'")
+        ensure_column(conn, "bank_transactions", "assigned_ledger", "TEXT DEFAULT ''")
+        ensure_column(conn, "bank_transactions", "is_locked", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "bank_transactions", "send_status", "TEXT NOT NULL DEFAULT 'not_sent'")
+        ensure_column(conn, "bank_transactions", "send_error", "TEXT DEFAULT ''")
+        ensure_column(conn, "bank_transactions", "tally_guid", "TEXT DEFAULT ''")
         # Only insert defaults if database is completely empty and no Tally sync has occurred
         has_masters = conn.execute("SELECT COUNT(*) count FROM masters").fetchone()["count"]
         if has_masters == 0:
@@ -545,42 +596,80 @@ def collection_xml(collection: str, tally_type: str, fetch: str = "Name,Parent")
     """
 
 
-def extract_names(xml: str) -> list[tuple[str, str, str]]:
-    results: list[tuple[str, str, str]] = []
+def extract_masters(xml: str, master_type: str) -> list[dict[str, Any]]:
+    results = []
+    if not xml:
+        return results
     try:
         root = ET.fromstring(sanitize_tally_xml(xml).encode("utf-8"))
-        nodes = root.findall(".//COLLECTION/*")
+        nodes = root.findall(".//DATA//COLLECTION/*")
         if not nodes:
             nodes = root.findall(".//DATA/*")
         if not nodes:
+            nodes = root.findall(".//COLLECTION/*")
+        if not nodes:
             nodes = list(root.iter())
-            
+
         for node in nodes:
             tag = node.tag.upper()
-            if tag in ("ENVELOPE", "HEADER", "BODY", "DESC", "DATA", "COLLECTION", "STATICVARIABLES"):
+            if tag in ("ENVELOPE", "HEADER", "BODY", "DESC", "DATA", "COLLECTION", "STATICVARIABLES", "TDLMESSAGE"):
                 continue
+
+            # Exact name: do not trim, do not normalize - vouchers must match character for character
             name = node.attrib.get("NAME") or node.attrib.get("Name") or ""
             parent = ""
+            opening_balance = ""
+            unit = ""
+            formal_name = ""
+
             for child in list(node):
                 ctag = child.tag.upper()
                 if ctag.endswith("NAME") and not name and child.text:
-                    name = child.text.strip()
-                if ctag.endswith("PARENT") and child.text:
-                    parent = child.text.strip()
-            if name and len(name) < 180:
+                    name = child.text
+                elif ctag == "PARENT" and child.text:
+                    parent = child.text
+                elif ctag in ("OPENINGBALANCE", "OPENINGBAL") and child.text:
+                    opening_balance = child.text
+                elif ctag in ("BASEUNITS", "UNIT", "UNITS") and child.text:
+                    unit = child.text
+                elif ctag in ("ORIGINALNAME", "FORMALNAME") and child.text:
+                    formal_name = child.text
+
+            if name:
                 raw_xml = ET.tostring(node, encoding="unicode")
-                results.append((name, parent, raw_xml))
+                results.append({
+                    "type": master_type,
+                    "name": name,
+                    "parent": parent,
+                    "opening_balance": opening_balance,
+                    "unit": unit,
+                    "formal_name": formal_name,
+                    "raw_xml": raw_xml
+                })
     except Exception:
         for match in re.finditer(r'NAME="([^"]+)"', xml):
-            results.append((match.group(1), "", f'<MASTER NAME="{match.group(1)}"/>'))
+            results.append({
+                "type": master_type,
+                "name": match.group(1),
+                "parent": "",
+                "opening_balance": "",
+                "unit": "",
+                "formal_name": "",
+                "raw_xml": f'<MASTER NAME="{match.group(1)}"/>'
+            })
     seen = set()
     unique = []
-    for name, parent, raw_xml in results:
-        key = name.lower()
+    for item in results:
+        key = item["name"]
         if key not in seen:
             seen.add(key)
-            unique.append((name, parent, raw_xml))
+            unique.append(item)
     return unique
+
+
+def extract_names(xml: str) -> list[tuple[str, str, str]]:
+    masters = extract_masters(xml, "ledger")
+    return [(m["name"], m["parent"], m["raw_xml"]) for m in masters]
 
 
 def sanitize_tally_xml(xml: str) -> str:
@@ -632,7 +721,9 @@ def extract_vouchers(xml: str) -> list[dict[str, Any]]:
     vouchers: list[dict[str, Any]] = []
     try:
         root = ET.fromstring(sanitize_tally_xml(xml).encode("utf-8"))
-        for node in root.iter():
+        data_nodes = root.findall(".//DATA")
+        search_root = data_nodes[0] if data_nodes else root
+        for node in search_root.iter():
             if node.tag.upper() != "VOUCHER":
                 continue
             remote_id = node.attrib.get("REMOTEID") or ""
@@ -684,18 +775,32 @@ def extract_vouchers(xml: str) -> list[dict[str, Any]]:
 def replace_master_snapshot(conn: sqlite3.Connection, master_type: str, items: list, raw_xml: str = "") -> None:
     conn.execute("DELETE FROM masters WHERE type=?", (master_type,))
     for item in items:
-        if len(item) == 3:
+        if isinstance(item, dict):
+            name = item.get("name") or ""
+            parent = item.get("parent") or ""
+            opening_balance = item.get("opening_balance") or ""
+            unit = item.get("unit") or ""
+            formal_name = item.get("formal_name") or ""
+            item_xml = item.get("raw_xml") or raw_xml
+        elif len(item) == 3:
             name, parent, item_xml = item
+            opening_balance = ""
+            unit = ""
+            formal_name = ""
         else:
             name, parent = item
             item_xml = raw_xml
-        conn.execute(
-            """
-            INSERT INTO masters(type, name, parent, raw_xml, updated_at)
-            VALUES(?, ?, ?, ?, ?)
-            """,
-            (master_type, name, parent, item_xml, now_iso()),
-        )
+            opening_balance = ""
+            unit = ""
+            formal_name = ""
+        if name:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO masters(type, name, parent, opening_balance, unit, formal_name, raw_xml, updated_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (master_type, name, parent, opening_balance, unit, formal_name, item_xml, now_iso()),
+            )
 
 
 def replace_voucher_snapshot(conn: sqlite3.Connection, vouchers: list[dict[str, Any]]) -> None:
@@ -723,6 +828,416 @@ def replace_voucher_snapshot(conn: sqlite3.Connection, vouchers: list[dict[str, 
                 now_iso(),
             ),
         )
+
+
+# ------------------------------------------------------------------
+# BANK STATEMENT PDF PARSER & INTELLIGENT RECONCILIATION ENGINE
+# ------------------------------------------------------------------
+DATE_PATTERN = re.compile(r"^\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}$")
+
+
+def is_amount_text(s: str) -> bool:
+    if not s:
+        return False
+    clean = s.replace(",", "").strip()
+    return bool(re.match(r"^-?\d+\.\d{2}$", clean))
+
+
+def parse_amount_num(s: str) -> float:
+    if not s:
+        return 0.0
+    clean = s.replace(",", "").strip()
+    try:
+        return float(clean)
+    except ValueError:
+        return 0.0
+
+
+def find_bank_table_header(words: list[dict[str, Any]]) -> tuple[float | None, list[dict[str, Any]] | None]:
+    line_buckets: dict[float, list[dict[str, Any]]] = {}
+    for w in words:
+        b = round(w["top"] / 4.0) * 4.0
+        line_buckets.setdefault(b, []).append(w)
+
+    for b in sorted(line_buckets.keys()):
+        lw = sorted(line_buckets[b], key=lambda x: x["x0"])
+        texts = [w["text"].upper() for w in lw]
+        has_date = any("DATE" in t for t in texts)
+        has_desc = any(any(k in t for k in ("PARTICULAR", "NARRATION", "DESCRIPTION", "DETAIL")) for t in texts)
+        has_amt = any(any(k in t for k in ("DEPOSIT", "WITHDRAWAL", "DEBIT", "CREDIT", "BALANCE", "AMOUNT")) for t in texts)
+        if has_date and has_desc and has_amt:
+            return b, lw
+    return None, None
+
+
+def cluster_pdf_words_by_line(words: list[dict[str, Any]], tolerance: float = 3.8) -> list[list[dict[str, Any]]]:
+    lines: list[list[dict[str, Any]]] = []
+    sorted_words = sorted(words, key=lambda w: (w["top"], w["x0"]))
+    for w in sorted_words:
+        added = False
+        for line in lines:
+            avg_top = sum(item["top"] for item in line) / len(line)
+            if abs(w["top"] - avg_top) <= tolerance:
+                line.append(w)
+                added = True
+                break
+        if not added:
+            lines.append([w])
+    result: list[list[dict[str, Any]]] = []
+    for line in sorted(lines, key=lambda l: min(w["top"] for w in l)):
+        result.append(sorted(line, key=lambda w: w["x0"]))
+    return result
+
+
+def parse_bank_statement_pdf(pdf_path: str) -> dict[str, Any]:
+    try:
+        import pdfplumber
+    except ImportError:
+        return {"error": "pdfplumber library is required. Please install it via pip."}
+
+    all_transactions: list[dict[str, Any]] = []
+    opening_balance: float | None = None
+    closing_balance: float = 0.0
+    total_deposits: float = 0.0
+    total_withdrawals: float = 0.0
+    balance_mismatches: int = 0
+    total_words_found: int = 0
+
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            global_ranges: dict[str, tuple[float, float]] | None = None
+
+            for p_idx, page in enumerate(pdf.pages):
+                words = page.extract_words()
+                if not words:
+                    continue
+                total_words_found += len(words)
+
+                header_top, header_words = find_bank_table_header(words)
+                if header_words:
+                    header_cols = []
+                    for w in header_words:
+                        t = w["text"].upper()
+                        role = None
+                        if "DATE" in t:
+                            role = "date"
+                        elif "MODE" in t:
+                            role = "mode"
+                        elif any(k in t for k in ("PARTICULAR", "NARRATION", "DESCRIPTION", "DETAIL")):
+                            role = "particulars"
+                        elif any(k in t for k in ("DEPOSIT", "CREDIT", "CR")):
+                            role = "deposit"
+                        elif any(k in t for k in ("WITHDRAWAL", "DEBIT", "DR")):
+                            role = "withdrawal"
+                        elif "BALANCE" in t:
+                            role = "balance"
+
+                        if role:
+                            header_cols.append((role, w["x0"], w["x1"]))
+
+                    header_cols.sort(key=lambda x: x[1])
+                    ranges: dict[str, tuple[float, float]] = {}
+                    for i, (role, x0, x1) in enumerate(header_cols):
+                        prev_bound = ranges[header_cols[i - 1][0]][1] if i > 0 else 0.0
+                        if i + 1 < len(header_cols):
+                            next_x0 = header_cols[i + 1][1]
+                            mid = (x1 + next_x0) / 2.0
+                            if role == "particulars":
+                                # Narration text is much wider than its header label and
+                                # runs right up to the first amount column.
+                                mid = max(mid, next_x0 - 10.0)
+                        else:
+                            mid = page.width
+                        ranges[role] = (prev_bound, mid)
+                    global_ranges = ranges
+                    top_cutoff = header_top + 6.0
+                elif global_ranges:
+                    ranges = global_ranges
+                    top_cutoff = 80.0
+                else:
+                    continue
+
+                body_words = [w for w in words if w["top"] >= top_cutoff and w["top"] < page.height - 4.0]
+                lines = cluster_pdf_words_by_line(body_words)
+
+                page_txns: list[dict[str, Any]] = []
+                orphans: list[tuple[float, str]] = []
+
+                for line in lines:
+                    line_top = min(w["top"] for w in line)
+                    col_texts: dict[str, list[str]] = {c: [] for c in ranges}
+                    for w in line:
+                        # Amounts are right-aligned, so a wide amount can start left of its
+                        # column boundary. Place amount-like words by their RIGHT edge.
+                        word_x = w["x1"] if is_amount_text(w["text"]) and "." in w["text"] else w["x0"]
+                        for c_name, (x_min, x_max) in ranges.items():
+                            if x_min <= word_x < x_max:
+                                col_texts[c_name].append(w["text"])
+                                break
+
+                    date_str = " ".join(col_texts.get("date", [])).strip()
+                    part_words = col_texts.get("particulars", [])
+                    mode_str = " ".join(col_texts.get("mode", [])).strip() if "mode" in ranges else ""
+
+                    dep_raw = " ".join(col_texts.get("deposit", [])).strip()
+                    wdr_raw = " ".join(col_texts.get("withdrawal", [])).strip()
+                    bal_raw = " ".join(col_texts.get("balance", [])).strip()
+
+                    if dep_raw and not is_amount_text(dep_raw):
+                        part_words.append(dep_raw)
+                        dep_raw = ""
+                    if wdr_raw and not is_amount_text(wdr_raw):
+                        part_words.append(wdr_raw)
+                        wdr_raw = ""
+                    if bal_raw and not is_amount_text(bal_raw):
+                        part_words.append(bal_raw)
+                        bal_raw = ""
+
+                    part_str = " ".join(part_words).strip()
+                    full_line = " ".join(w["text"] for w in line)
+
+                    if "B/F" in full_line or "BROUGHT FORWARD" in full_line.upper():
+                        if bal_raw and opening_balance is None:
+                            opening_balance = parse_amount_num(bal_raw)
+                        continue
+                    if "TOTAL" in full_line.upper() and len(full_line.split()) < 6:
+                        continue
+                    if "PAGE " in full_line.upper() and "OF" in full_line.upper():
+                        continue
+
+                    if DATE_PATTERN.match(date_str) and (dep_raw or wdr_raw or bal_raw):
+                        page_txns.append({
+                            "top": line_top,
+                            "date": date_str,
+                            "mode": mode_str,
+                            "parts": [(line_top, part_str)] if part_str else [],
+                            "deposit": parse_amount_num(dep_raw),
+                            "withdrawal": parse_amount_num(wdr_raw),
+                            "balance": parse_amount_num(bal_raw),
+                        })
+                    else:
+                        text_piece = " ".join(filter(None, [part_str, mode_str])).strip()
+                        if text_piece:
+                            orphans.append((line_top, text_piece))
+
+                # Banks centre the amount/date line inside a multi-line narration, so
+                # wrapped lines can sit above OR below it. Attach every narration-only
+                # line to the nearest date/amount line on the page.
+                # Lines far from every transaction (page footers, legal text) are dropped.
+                tops = sorted(l[0]["top"] for l in lines if l)
+                gaps = sorted(b - a for a, b in zip(tops, tops[1:]) if b - a > 1.0)
+                max_dist = 3.0 * gaps[len(gaps) // 2] if gaps else 30.0
+                max_dist = max(max_dist, 24.0)
+                if page_txns:
+                    for o_top, o_text in orphans:
+                        nearest = min(page_txns, key=lambda t: abs(t["top"] - o_top))
+                        if abs(nearest["top"] - o_top) <= max_dist:
+                            nearest["parts"].append((o_top, o_text))
+
+                for t in page_txns:
+                    narration = " ".join(text for _, text in sorted(t["parts"], key=lambda x: x[0])).strip()
+                    total_deposits += t["deposit"]
+                    total_withdrawals += t["withdrawal"]
+                    closing_balance = t["balance"]
+                    all_transactions.append({
+                        "row_no": len(all_transactions) + 1,
+                        "page": p_idx + 1,
+                        "date": t["date"],
+                        "mode": t["mode"],
+                        "narration": narration,
+                        "deposit": t["deposit"],
+                        "withdrawal": t["withdrawal"],
+                        "balance": t["balance"],
+                    })
+
+        if total_words_found < 20:
+            return {"error": "Scanned PDF detected (no machine-readable text found). Please upload an electronic bank statement PDF or Excel file."}
+
+        # Running balance check
+        curr = opening_balance
+        if curr is not None:
+            for t in all_transactions:
+                expected = round(curr + t["deposit"] - t["withdrawal"], 2)
+                actual = round(t["balance"], 2)
+                t["balance_mismatch"] = bool(abs(expected - actual) > 0.05 and t["balance"] > 0)
+                if t["balance_mismatch"]:
+                    balance_mismatches += 1
+                curr = t["balance"]
+        else:
+            for t in all_transactions:
+                t["balance_mismatch"] = False
+
+        return {
+            "opening_balance": opening_balance or 0.0,
+            "closing_balance": closing_balance,
+            "total_deposits": round(total_deposits, 2),
+            "total_withdrawals": round(total_withdrawals, 2),
+            "balance_mismatches": balance_mismatches,
+            "transactions": all_transactions,
+        }
+    except Exception as e:
+        return {"error": f"PDF parsing failed: {str(e)}"}
+
+
+def classify_bank_narration(
+    narration: str, deposit: float, withdrawal: float, company: str, conn: sqlite3.Connection
+) -> tuple[str, str, bool]:
+    n_upper = narration.upper()
+    v_type = "Receipt" if deposit > 0 else "Payment"
+
+    # 1. Check custom company rules from ledger_rules table
+    rules = conn.execute("SELECT pattern, target_ledger, target_group FROM ledger_rules WHERE company=? OR company='*' ORDER BY LENGTH(pattern) DESC", (company,)).fetchall()
+    for r in rules:
+        pat = r["pattern"].strip()
+        if pat and pat.lower() in narration.lower():
+            return v_type, r["target_ledger"], True
+
+    # 2. Cash / ATM (Contra)
+    if any(k in n_upper for k in ("BY CASH", "CASH DEP", "CASH WDL", "ATM/")):
+        return "Contra", "Cash", True
+
+    # 3. Interest & Bank Charges
+    if ":INT.PD:" in n_upper or "INTEREST" in n_upper:
+        return "Receipt", "Interest Income", True
+    if any(k in n_upper for k in ("CHG/", "CHARGES", "TAX/", "GST/")):
+        return "Payment", "Bank Charges", True
+
+    # 4. Pattern extraction
+    extracted_party = ""
+    upi_match = re.search(r"UPI/\d+/([^/]+)/([^/]+)/?", narration, flags=re.I)
+    if upi_match:
+        part1, part2 = upi_match.group(1).strip(), upi_match.group(2).strip()
+        if any(b in part2.upper() for b in ("BANK", "LTD", "OKAXIS", "OKICICI", "OKSBI", "OKHDFC", "YBL")):
+            extracted_party = part1.split("@")[0]
+        else:
+            extracted_party = part2.split("@")[0]
+    elif "UPI/" in n_upper:
+        parts = [p.strip() for p in narration.split("/") if p.strip()]
+        for p in parts[2:]:
+            if "@" in p or len(p) > 3:
+                extracted_party = p.split("@")[0]
+                break
+
+    if not extracted_party:
+        neft_match = re.search(r"NEFT-[A-Z0-9]+-([^-/]+)", narration, flags=re.I)
+        if neft_match:
+            extracted_party = neft_match.group(1).strip()
+
+    if not extracted_party:
+        imps_match = re.search(r"IMPS/\d+/([^/]+)/([^/]+)", narration, flags=re.I)
+        if imps_match:
+            extracted_party = imps_match.group(1).strip()
+
+    if not extracted_party:
+        clg_match = re.search(r"CLG/([^/]+)", narration, flags=re.I)
+        if clg_match:
+            extracted_party = clg_match.group(1).strip()
+
+    if not extracted_party:
+        vps_match = re.search(r"VPS/([^/]+)", narration, flags=re.I)
+        if vps_match:
+            extracted_party = vps_match.group(1).strip()
+
+    if extracted_party:
+        extracted_party = re.sub(r"[\d_]+", " ", extracted_party).strip()
+
+    existing_ledgers = [row["name"] for row in conn.execute("SELECT name FROM masters WHERE type IN ('ledger', 'gst_ledger')").fetchall()]
+    if extracted_party and existing_ledgers:
+        matches = get_close_matches(extracted_party, existing_ledgers, n=1, cutoff=0.55)
+        if matches:
+            return v_type, matches[0], True
+
+    return v_type, extracted_party, False
+
+
+def generate_bank_voucher_xml(company: str, bank_ledger: str, txn: dict[str, Any]) -> str:
+    from xml.sax.saxutils import escape as xml_escape
+    comp_clean = xml_escape(company or "")
+    bank_clean = xml_escape(bank_ledger or "Bank Accounts")
+    party_clean = xml_escape(txn.get("assigned_ledger") or "Suspense")
+    narr_clean = xml_escape(txn.get("narration") or "")
+    v_type = txn.get("voucher_type") or ("Receipt" if txn.get("deposit", 0) > 0 else "Payment")
+    amount = txn.get("deposit") if txn.get("deposit", 0) > 0 else txn.get("withdrawal", 0)
+    amount_str = f"{abs(float(amount)):.2f}"
+
+    raw_date = txn.get("date") or ""
+    date_parts = re.split(r"[-/\.]", raw_date)
+    if len(date_parts) == 3:
+        if len(date_parts[0]) == 4:
+            tally_date = f"{date_parts[0]}{date_parts[1].zfill(2)}{date_parts[2].zfill(2)}"
+        else:
+            tally_date = f"{date_parts[2]}{date_parts[1].zfill(2)}{date_parts[0].zfill(2)}"
+    else:
+        tally_date = datetime.now().strftime("%Y%m%d")
+
+    if v_type == "Receipt":
+        return f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Import</TALLYREQUEST><TYPE>Data</TYPE><ID>Vouchers</ID></HEADER>
+  <BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>{comp_clean}</SVCURRENTCOMPANY></STATICVARIABLES></DESC>
+  <DATA><TALLYMESSAGE>
+    <VOUCHER VCHTYPE="Receipt" ACTION="Create">
+      <DATE>{tally_date}</DATE>
+      <VOUCHERTYPENAME>Receipt</VOUCHERTYPENAME>
+      <PARTYLEDGERNAME>{party_clean}</PARTYLEDGERNAME>
+      <NARRATION>{narr_clean}</NARRATION>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>{bank_clean}</LEDGERNAME>
+        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+        <AMOUNT>-{amount_str}</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>{party_clean}</LEDGERNAME>
+        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+        <AMOUNT>{amount_str}</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+    </VOUCHER>
+  </TALLYMESSAGE></DATA></BODY>
+</ENVELOPE>"""
+    elif v_type == "Contra":
+        return f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Import</TALLYREQUEST><TYPE>Data</TYPE><ID>Vouchers</ID></HEADER>
+  <BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>{comp_clean}</SVCURRENTCOMPANY></STATICVARIABLES></DESC>
+  <DATA><TALLYMESSAGE>
+    <VOUCHER VCHTYPE="Contra" ACTION="Create">
+      <DATE>{tally_date}</DATE>
+      <VOUCHERTYPENAME>Contra</VOUCHERTYPENAME>
+      <NARRATION>{narr_clean}</NARRATION>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>{bank_clean}</LEDGERNAME>
+        <ISDEEMEDPOSITIVE>{"Yes" if txn.get("deposit", 0) > 0 else "No"}</ISDEEMEDPOSITIVE>
+        <AMOUNT>{"-" if txn.get("deposit", 0) > 0 else ""}{amount_str}</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>{party_clean}</LEDGERNAME>
+        <ISDEEMEDPOSITIVE>{"No" if txn.get("deposit", 0) > 0 else "Yes"}</ISDEEMEDPOSITIVE>
+        <AMOUNT>{"" if txn.get("deposit", 0) > 0 else "-"}{amount_str}</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+    </VOUCHER>
+  </TALLYMESSAGE></DATA></BODY>
+</ENVELOPE>"""
+    else:  # Payment
+        return f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Import</TALLYREQUEST><TYPE>Data</TYPE><ID>Vouchers</ID></HEADER>
+  <BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>{comp_clean}</SVCURRENTCOMPANY></STATICVARIABLES></DESC>
+  <DATA><TALLYMESSAGE>
+    <VOUCHER VCHTYPE="Payment" ACTION="Create">
+      <DATE>{tally_date}</DATE>
+      <VOUCHERTYPENAME>Payment</VOUCHERTYPENAME>
+      <PARTYLEDGERNAME>{party_clean}</PARTYLEDGERNAME>
+      <NARRATION>{narr_clean}</NARRATION>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>{party_clean}</LEDGERNAME>
+        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+        <AMOUNT>-{amount_str}</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+      <ALLLEDGERENTRIES.LIST>
+        <LEDGERNAME>{bank_clean}</LEDGERNAME>
+        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+        <AMOUNT>{amount_str}</AMOUNT>
+      </ALLLEDGERENTRIES.LIST>
+    </VOUCHER>
+  </TALLYMESSAGE></DATA></BODY>
+</ENVELOPE>"""
 
 
 def voucher_delete_envelope(voucher_xml: str) -> str:
@@ -805,13 +1320,14 @@ def delete_synced_voucher(voucher_id: str) -> dict[str, Any]:
 def sync_tally() -> dict[str, Any]:
     status = tally_status()
     logs = []
-    synced = {"company": 0, "ledger": 0, "voucher_type": 0, "stock_group": 0, "stock_category": 0, "stock_item": 0, "unit": 0, "godown": 0, "gst_ledger": 0, "voucher": 0}
+    synced = {"company": 0, "ledger": 0, "group": 0, "voucher_type": 0, "stock_group": 0, "stock_category": 0, "stock_item": 0, "unit": 0, "godown": 0, "gst_ledger": 0, "voucher": 0}
     if not status["online"]:
         return {"online": False, "message": status["message"], "logs": [{"type": "status", "message": status["detail"]}], "counts": master_counts()}
 
     collections = [
         ("company", "Company", "Company"),
         ("ledger", "Ledgers", "Ledger"),
+        ("group", "Groups", "Group"),
         ("voucher_type", "VoucherTypes", "Voucher Type"),
         ("stock_group", "StockGroups", "Stock Group"),
         ("stock_category", "StockCategories", "Stock Category"),
@@ -822,19 +1338,21 @@ def sync_tally() -> dict[str, Any]:
     with db() as conn:
         for master_type, collection, tally_type in collections:
             if master_type == "stock_item":
-                fetch_fields = "Name,Parent,BaseUnits"
+                fetch_fields = "Name,Parent,BaseUnits,OpeningBalance"
             elif master_type == "ledger":
                 fetch_fields = "Name,Parent,Address,StateName,CountryName,PhoneNumber,EMail,GSTRegistrationType,PartyGSTIN,IsBillwiseOn,OpeningBalance,TaxType,GSTDutyType,RateOfTaxCalculation"
+            elif master_type == "unit":
+                fetch_fields = "Name,OriginalName,DecimalPlaces"
             else:
                 fetch_fields = "Name,Parent"
             ok, text = tally_post(collection_xml(collection, tally_type, fetch_fields), timeout=7.0)
             if not ok:
                 logs.append({"type": master_type, "status": "failed", "message": text})
                 continue
-            names = extract_names(text)
-            replace_master_snapshot(conn, master_type, names, text)
-            synced[master_type] = len(names)
-            logs.append({"type": master_type, "status": "synced", "count": len(names)})
+            masters = extract_masters(text, master_type)
+            replace_master_snapshot(conn, master_type, masters, text)
+            synced[master_type] = len(masters)
+            logs.append({"type": master_type, "status": "synced", "count": len(masters)})
         gst_names = [
             (row["name"], row["parent"] or "")
             for row in conn.execute(
@@ -877,6 +1395,7 @@ def master_counts() -> dict[str, int]:
     return {
         "companies": counts.get("company", 1 if counts.get("ledger") else 0),
         "ledgers": counts.get("ledger", 0),
+        "groups": counts.get("group", 0),
         "voucherTypes": counts.get("voucher_type", 0),
         "stockGroups": counts.get("stock_group", 0),
         "stockCategories": counts.get("stock_category", 0),
@@ -2753,8 +3272,23 @@ class DestockHandler(SimpleHTTPRequestHandler):
             return
         if self.path.startswith("/api/masters"):
             with db() as conn:
-                rows = rows_to_dicts(conn.execute("SELECT type, name, parent FROM masters ORDER BY type, name").fetchall())
-            json_response(self, {"counts": master_counts(), "masters": rows})
+                last_sync_row = conn.execute("SELECT value FROM settings WHERE key='last_sync'").fetchone()
+                last_sync = last_sync_row["value"] if last_sync_row else None
+                active_comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
+                active_company = active_comp_row["value"] if active_comp_row else ""
+                rows = rows_to_dicts(conn.execute(
+                    """
+                    SELECT id, type, name, parent, opening_balance, unit, formal_name, updated_at
+                    FROM masters
+                    ORDER BY type, name
+                    """
+                ).fetchall())
+            json_response(self, {
+                "counts": master_counts(),
+                "masters": rows,
+                "lastSync": last_sync,
+                "activeCompany": active_company
+            })
             return
         if self.path.startswith("/api/tally/get-master"):
             query = parse_qs(urlparse(self.path).query)
@@ -2810,6 +3344,40 @@ class DestockHandler(SimpleHTTPRequestHandler):
             else:
                 json_response(self, {"error": "Template file not found."}, 404)
             return
+
+        if self.path.startswith("/api/bank-statement/list"):
+            with db() as conn:
+                stmts = rows_to_dicts(conn.execute("SELECT * FROM bank_statements ORDER BY created_at DESC").fetchall())
+            json_response(self, {"ok": True, "statements": stmts})
+            return
+
+        if self.path.startswith("/api/bank-statement/details"):
+            query = parse_qs(urlparse(self.path).query)
+            stmt_id = (query.get("id") or [""])[0]
+            with db() as conn:
+                stmt = conn.execute("SELECT * FROM bank_statements WHERE id=?", (stmt_id,)).fetchone()
+                if not stmt:
+                    json_response(self, {"error": "Statement not found"}, 404)
+                    return
+                txns = rows_to_dicts(conn.execute("SELECT * FROM bank_transactions WHERE statement_id=? ORDER BY row_no ASC", (stmt_id,)).fetchall())
+                company_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
+                active_company = company_row["value"] if company_row else ""
+                rules = rows_to_dicts(conn.execute("SELECT * FROM ledger_rules WHERE company=? OR company='*' ORDER BY pattern ASC", (active_company,)).fetchall())
+            json_response(self, {
+                "ok": True,
+                "statement": dict(stmt),
+                "transactions": txns,
+                "rules": rules,
+                "activeCompany": active_company
+            })
+            return
+
+        if self.path.startswith("/api/bank-statement/rules"):
+            with db() as conn:
+                rules = rows_to_dicts(conn.execute("SELECT * FROM ledger_rules ORDER BY pattern ASC").fetchall())
+            json_response(self, {"ok": True, "rules": rules})
+            return
+
         super().do_GET()
 
     def do_POST(self) -> None:
@@ -2851,23 +3419,45 @@ class DestockHandler(SimpleHTTPRequestHandler):
             if task_id:
                 conn["completed"][task_id] = {"status": status, "data": task_data, "updatedAt": time.time()}
 
-            # Ingest only real masters from the active company in Tally
+            # Ingest all real masters from the active company in Tally
             with db() as db_conn:
                 if task_data.get("company"):
                     db_conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES('active_company', ?)", (task_data["company"],))
                     db_conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES('last_sync', ?)", (now_iso(),))
 
                 if task_data.get("ledgersXml"):
-                    ledgers = extract_names(task_data["ledgersXml"])
+                    ledgers = extract_masters(task_data["ledgersXml"], "ledger")
                     replace_master_snapshot(db_conn, "ledger", ledgers, task_data["ledgersXml"])
+                if task_data.get("groupsXml"):
+                    groups = extract_masters(task_data["groupsXml"], "group")
+                    replace_master_snapshot(db_conn, "group", groups, task_data["groupsXml"])
+                if task_data.get("stockItemsXml"):
+                    sitems = extract_masters(task_data["stockItemsXml"], "stock_item")
+                    replace_master_snapshot(db_conn, "stock_item", sitems, task_data["stockItemsXml"])
+                if task_data.get("unitsXml"):
+                    units = extract_masters(task_data["unitsXml"], "unit")
+                    replace_master_snapshot(db_conn, "unit", units, task_data["unitsXml"])
+                if task_data.get("godownsXml"):
+                    godowns = extract_masters(task_data["godownsXml"], "godown")
+                    replace_master_snapshot(db_conn, "godown", godowns, task_data["godownsXml"])
                 if task_data.get("voucherTypesXml"):
-                    vtypes = extract_names(task_data["voucherTypesXml"])
+                    vtypes = extract_masters(task_data["voucherTypesXml"], "voucher_type")
                     replace_master_snapshot(db_conn, "voucher_type", vtypes, task_data["voucherTypesXml"])
                 if task_data.get("vouchersXml"):
                     vouchers = extract_vouchers(task_data["vouchersXml"])
                     replace_voucher_snapshot(db_conn, vouchers)
 
-            json_response(self, {"ok": True, "counts": master_counts()})
+                if task_data.get("voucherResults"):
+                    for v_res in task_data["voucherResults"]:
+                        v_id = v_res.get("id")
+                        v_status = "sent" if v_res.get("status") == "imported" else "failed"
+                        v_msg = v_res.get("message", "")
+                        db_conn.execute(
+                            "UPDATE bank_transactions SET send_status=?, send_error=?, updated_at=? WHERE id=?",
+                            (v_status, v_msg, now_iso(), v_id)
+                        )
+
+            json_response(self, {"ok": True, "counts": master_counts(), "lastSync": now_iso()})
             return
 
         if self.path.startswith("/api/connector/task-status"):
@@ -2888,13 +3478,13 @@ class DestockHandler(SimpleHTTPRequestHandler):
             if conn["online"]:
                 task_id = f"sync_{uuid.uuid4().hex[:8]}"
                 conn["tasks"].append({"id": task_id, "action": "SYNC_MASTERS", "payload": {}})
-                # Wait briefly up to 4 seconds for connector to execute task
-                for _ in range(40):
+                # Wait up to 10 seconds for connector to execute task and post result
+                for _ in range(100):
                     time.sleep(0.1)
                     if task_id in conn["completed"]:
                         res = conn["completed"][task_id]
                         if res.get("status") == "completed":
-                            json_response(self, {"online": True, "message": f"Successfully synced masters via Tally Automation Connector for {conn['activeCompany']}.", "counts": master_counts()})
+                            json_response(self, {"online": True, "message": f"Successfully synced masters via Tally Automation Connector for {conn.get('activeCompany', '')}.", "counts": master_counts(), "lastSync": now_iso()})
                         else:
                             json_response(self, {"online": False, "message": res.get("error", "Sync failed on connector"), "counts": master_counts()})
                         return
@@ -3079,6 +3669,229 @@ class DestockHandler(SimpleHTTPRequestHandler):
                 p["__row_id__"] = row["id"]
                 payloads.append(p)
             json_response(self, validate_payloads(batch_id, payloads, gst_enabled, gst_mode))
+            return
+
+        if self.path.startswith("/api/bank-statement/upload"):
+            file_item = read_multipart_file(self, "file")
+            if file_item is None:
+                json_response(self, {"error": "Upload must be multipart/form-data."}, 400)
+                return
+            if not file_item.filename:
+                json_response(self, {"error": "No PDF file received."}, 400)
+                return
+            query = parse_qs(urlparse(self.path).query)
+            bank_ledger = (query.get("bankLedger") or ["Bank Accounts"])[0]
+            stmt_id = str(uuid.uuid4())
+            filename = file_item.filename
+            stored = UPLOAD_DIR / f"{stmt_id}_{filename}"
+            with stored.open("wb") as fh:
+                fh.write(file_item.content)
+
+            parse_result = parse_bank_statement_pdf(str(stored))
+            if "error" in parse_result:
+                json_response(self, {"error": parse_result["error"]}, 400)
+                return
+
+            txns = parse_result.get("transactions", [])
+            op_bal = parse_result.get("opening_balance", 0.0)
+            cl_bal = parse_result.get("closing_balance", 0.0)
+            tot_dep = parse_result.get("total_deposits", 0.0)
+            tot_wdr = parse_result.get("total_withdrawals", 0.0)
+
+            with db() as conn:
+                comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
+                active_company = comp_row["value"] if comp_row else ""
+                conn.execute(
+                    """
+                    INSERT INTO bank_statements(id, filename, bank_ledger, opening_balance, closing_balance, total_deposits, total_withdrawals, row_count, created_at, status)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (stmt_id, filename, bank_ledger, op_bal, cl_bal, tot_dep, tot_wdr, len(txns), now_iso(), "imported")
+                )
+
+                enriched_txns = []
+                for t in txns:
+                    t_id = str(uuid.uuid4())
+                    v_type, sug_ledger, is_rule = classify_bank_narration(t["narration"], t["deposit"], t["withdrawal"], active_company, conn)
+                    is_locked = 1 if is_rule and sug_ledger else 0
+                    assigned = sug_ledger if is_rule else ""
+                    conn.execute(
+                        """
+                        INSERT INTO bank_transactions(id, statement_id, row_no, date, mode, narration, deposit, withdrawal, balance, voucher_type, assigned_ledger, is_locked, send_status, updated_at)
+                        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_sent', ?)
+                        """,
+                        (t_id, stmt_id, t["row_no"], t["date"], t["mode"], t["narration"], t["deposit"], t["withdrawal"], t["balance"], v_type, assigned, is_locked, now_iso())
+                    )
+                    enriched_txns.append({
+                        "id": t_id,
+                        "statement_id": stmt_id,
+                        "row_no": t["row_no"],
+                        "date": t["date"],
+                        "mode": t["mode"],
+                        "narration": t["narration"],
+                        "deposit": t["deposit"],
+                        "withdrawal": t["withdrawal"],
+                        "balance": t["balance"],
+                        "voucher_type": v_type,
+                        "assigned_ledger": assigned,
+                        "suggested_ledger": sug_ledger,
+                        "is_locked": is_locked,
+                        "send_status": "not_sent",
+                        "balance_mismatch": t.get("balance_mismatch", False)
+                    })
+
+            json_response(self, {
+                "ok": True,
+                "statement": {
+                    "id": stmt_id,
+                    "filename": filename,
+                    "bank_ledger": bank_ledger,
+                    "opening_balance": op_bal,
+                    "closing_balance": cl_bal,
+                    "total_deposits": tot_dep,
+                    "total_withdrawals": tot_wdr,
+                    "row_count": len(txns),
+                    "balance_mismatches": parse_result.get("balance_mismatches", 0)
+                },
+                "transactions": enriched_txns
+            })
+            return
+
+        if self.path.startswith("/api/bank-statement/assign"):
+            data = read_json(self)
+            stmt_id = data.get("statementId")
+            txn_ids = data.get("transactionIds", [])
+            ledger = (data.get("ledger") or "").strip()
+            v_type = data.get("voucherType")
+            lock = 1 if data.get("lock", True) else 0
+            create_rule = bool(data.get("createRule", False))
+            rule_pattern = (data.get("rulePattern") or "").strip()
+
+            with db() as conn:
+                comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
+                company = comp_row["value"] if comp_row else ""
+                if create_rule and rule_pattern and ledger:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO ledger_rules(id, company, pattern, target_ledger, target_group, created_at) VALUES(?, ?, ?, ?, 'Sundry Debtors', ?)",
+                        (str(uuid.uuid4()), company, rule_pattern, ledger, now_iso())
+                    )
+
+                for tid in txn_ids:
+                    if v_type:
+                        conn.execute("UPDATE bank_transactions SET assigned_ledger=?, voucher_type=?, is_locked=?, updated_at=? WHERE id=?", (ledger, v_type, lock, now_iso(), tid))
+                    else:
+                        conn.execute("UPDATE bank_transactions SET assigned_ledger=?, is_locked=?, updated_at=? WHERE id=?", (ledger, lock, now_iso(), tid))
+
+            json_response(self, {"ok": True, "updatedCount": len(txn_ids)})
+            return
+
+        if self.path.startswith("/api/bank-statement/unlock"):
+            data = read_json(self)
+            txn_ids = data.get("transactionIds", [])
+            with db() as conn:
+                for tid in txn_ids:
+                    conn.execute("UPDATE bank_transactions SET is_locked=0, updated_at=? WHERE id=?", (now_iso(), tid))
+            json_response(self, {"ok": True, "unlockedCount": len(txn_ids)})
+            return
+
+        if self.path.startswith("/api/bank-statement/create-ledger"):
+            data = read_json(self)
+            name = (data.get("name") or "").strip()
+            parent = (data.get("parent") or "Sundry Debtors").strip()
+            opening_bal = (data.get("openingBalance") or "").strip()
+            if not name:
+                json_response(self, {"error": "Ledger name is required"}, 400)
+                return
+            with db() as conn:
+                comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
+                active_company = comp_row["value"] if comp_row else ""
+                conn.execute(
+                    "INSERT OR REPLACE INTO masters(type, name, parent, opening_balance, updated_at) VALUES('ledger', ?, ?, ?, ?)",
+                    (name, parent, opening_bal, now_iso())
+                )
+
+            ledger_xml = f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Import</TALLYREQUEST><TYPE>Data</TYPE><ID>All Masters</ID></HEADER>
+  <BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>{active_company}</SVCURRENTCOMPANY></STATICVARIABLES></DESC>
+  <DATA><TALLYMESSAGE>
+    <LEDGER NAME="{name}" ACTION="Create">
+      <NAME>{name}</NAME>
+      <PARENT>{parent}</PARENT>
+      <OPENINGBALANCE>{opening_bal}</OPENINGBALANCE>
+    </LEDGER>
+  </TALLYMESSAGE></DATA></BODY>
+</ENVELOPE>"""
+            conn_client = get_connector("guest-01")
+            if conn_client["online"]:
+                task_id = f"ledger_{uuid.uuid4().hex[:8]}"
+                conn_client["tasks"].append({
+                    "id": task_id,
+                    "action": "DISPATCH_VOUCHERS",
+                    "payload": {"vouchers": [{"id": name, "xml": ledger_xml}]}
+                })
+
+            json_response(self, {"ok": True, "name": name, "parent": parent})
+            return
+
+        if self.path.startswith("/api/bank-statement/send-tally"):
+            data = read_json(self)
+            stmt_id = data.get("statementId")
+            txn_ids = data.get("transactionIds", [])
+            username = data.get("username", "guest-01")
+
+            # Check the Connector BEFORE touching any row, so an offline Connector
+            # never leaves transactions stuck in the "queued" state.
+            conn_client = get_connector(username)
+            if not conn_client["online"]:
+                json_response(self, {"error": "Tally Automation Connector is offline. Please launch Tally Connector on your desktop."}, 400)
+                return
+
+            skipped_sent = 0
+            with db() as conn:
+                stmt = conn.execute("SELECT * FROM bank_statements WHERE id=?", (stmt_id,)).fetchone()
+                if not stmt:
+                    json_response(self, {"error": "Statement not found"}, 400)
+                    return
+                bank_ledger = stmt["bank_ledger"]
+                comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
+                active_company = (comp_row["value"] if comp_row else "") or conn_client.get("activeCompany", "")
+
+                if txn_ids:
+                    placeholders = ",".join("?" for _ in txn_ids)
+                    rows = conn.execute(
+                        f"SELECT * FROM bank_transactions WHERE statement_id=? AND id IN ({placeholders})",
+                        [stmt_id, *txn_ids],
+                    ).fetchall()
+                else:
+                    rows = conn.execute("SELECT * FROM bank_transactions WHERE statement_id=? AND assigned_ledger != '' AND send_status != 'sent'", (stmt_id,)).fetchall()
+
+                vouchers_to_dispatch = []
+                for r in rows:
+                    if not r["assigned_ledger"]:
+                        continue
+                    if r["send_status"] == "sent":
+                        skipped_sent += 1  # never create a duplicate voucher in Tally
+                        continue
+                    r_dict = dict(r)
+                    xml = generate_bank_voucher_xml(active_company, bank_ledger, r_dict)
+                    vouchers_to_dispatch.append({
+                        "id": r["id"],
+                        "xml": xml
+                    })
+                    conn.execute("UPDATE bank_transactions SET send_status='queued', updated_at=? WHERE id=?", (now_iso(), r["id"]))
+
+            if not vouchers_to_dispatch:
+                json_response(self, {"ok": True, "queued": 0, "skippedAlreadySent": skipped_sent, "message": "Nothing to send: no ready rows."})
+                return
+
+            task_id = f"bank_send_{uuid.uuid4().hex[:8]}"
+            conn_client["tasks"].append({
+                "id": task_id,
+                "action": "DISPATCH_VOUCHERS",
+                "payload": {"vouchers": vouchers_to_dispatch}
+            })
+
+            json_response(self, {"ok": True, "queued": len(vouchers_to_dispatch), "skippedAlreadySent": skipped_sent, "taskId": task_id})
             return
         if self.path.startswith("/api/tally/send"):
             data = read_json(self)
