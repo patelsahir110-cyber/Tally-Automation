@@ -4228,7 +4228,7 @@ async function createLedgerFromHighlighter() {
   try {
     const res = await api("/api/bank-statement/create-ledger", {
       method: "POST",
-      body: { name, parent: group },
+      body: { name, parent: group, username: state.user?.username || "guest-01" },
     });
 
     if (res && res.ok) {
@@ -4244,7 +4244,7 @@ async function createLedgerFromHighlighter() {
       });
 
       closeNarrationHighlighter();
-      setNotice(`Created Tally Ledger "${name}" under "${group}" and assigned!`);
+      setNotice(`Ledger "${name}" created in TallyPrime and assigned!`);
     } else {
       setNotice(res?.error || "Failed to create ledger");
     }
@@ -4756,6 +4756,13 @@ function bankImportScreen() {
             onclick="autoMapSuggestedBankLedgers()">
             <span class="material-symbols-outlined text-[16px]">auto_fix_high</span>
             <span>Auto-Map Suggestions</span>
+          </button>
+
+          <button 
+            class="px-3.5 py-1.5 rounded-xl border border-primary/40 bg-primary/10 text-xs font-bold hover:bg-primary hover:text-white text-primary flex items-center gap-1.5 transition-all"
+            onclick="promptCreateLedger()">
+            <span class="material-symbols-outlined text-[16px]">add_circle</span>
+            <span>+ Create Ledger</span>
           </button>
         </div>
       </div>
@@ -5958,6 +5965,7 @@ async function submitCreateLedgerForm() {
         type: "ledger",
         name: form.name.trim(),
         parent: form.parent,
+        username: state.user?.username || "guest-01",
         billwiseOn: form.billwiseOn,
         address: form.address,
         state: form.state,

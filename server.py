@@ -1593,11 +1593,11 @@ def build_ledger_master_xml(
     
     xml_parts = [
         f'<LEDGER NAME="{safe_name}" ACTION="Create">',
-        f'  <NAME>{safe_name}</NAME>',
+        f'  <NAME.LIST><NAME>{safe_name}</NAME></NAME.LIST>',
         f'  <PARENT>{safe_parent}</PARENT>',
         f'  <ISBILLWISEON>{escape(billwise_on)}</ISBILLWISEON>',
         '  <AFFECTSSTOCK>No</AFFECTSSTOCK>',
-        f'  <OPENINGBALANCE>{escape(opening_balance)}</OPENINGBALANCE>'
+        f'  <OPENINGBALANCE>{escape(opening_balance or "0")}</OPENINGBALANCE>'
     ]
     
     if address:
@@ -3394,9 +3394,15 @@ class DestockHandler(SimpleHTTPRequestHandler):
             username = data.get("username", "guest-01")
             conn = get_connector(username)
             conn["online"] = bool(data.get("tallyOnline", False))
-            conn["activeCompany"] = data.get("activeCompany", "")
+            active_comp = data.get("activeCompany", "")
+            conn["activeCompany"] = active_comp
             conn["tallyUrl"] = data.get("tallyUrl", "http://127.0.0.1:9000")
             conn["lastPing"] = time.time()
+
+            if active_comp and "Offline" not in active_comp and "Not Detected" not in active_comp and "No Company" not in active_comp:
+                with db() as db_conn:
+                    db_conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES('active_company', ?)", (active_comp,))
+
             json_response(self, {"ok": True, "online": conn["online"], "company": conn["activeCompany"]})
             return
 
@@ -3798,10 +3804,12 @@ class DestockHandler(SimpleHTTPRequestHandler):
             data = read_json(self)
             name = (data.get("name") or "").strip()
             parent = (data.get("parent") or "Sundry Debtors").strip()
-            opening_bal = (data.get("openingBalance") or "").strip()
+            opening_bal = (data.get("openingBalance") or "0").strip()
+            username = (data.get("username") or "guest-01").strip()
             if not name:
                 json_response(self, {"error": "Ledger name is required"}, 400)
                 return
+
             with db() as conn:
                 comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
                 active_company = comp_row["value"] if comp_row else ""
@@ -3810,27 +3818,56 @@ class DestockHandler(SimpleHTTPRequestHandler):
                     (name, parent, opening_bal, now_iso())
                 )
 
-            ledger_xml = f"""<ENVELOPE>
-  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Import</TALLYREQUEST><TYPE>Data</TYPE><ID>All Masters</ID></HEADER>
-  <BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>{active_company}</SVCURRENTCOMPANY></STATICVARIABLES></DESC>
-  <DATA><TALLYMESSAGE>
-    <LEDGER NAME="{name}" ACTION="Create">
-      <NAME>{name}</NAME>
-      <PARENT>{parent}</PARENT>
-      <OPENINGBALANCE>{opening_bal}</OPENINGBALANCE>
-    </LEDGER>
-  </TALLYMESSAGE></DATA></BODY>
-</ENVELOPE>"""
-            conn_client = get_connector("guest-01")
-            if conn_client["online"]:
-                task_id = f"ledger_{uuid.uuid4().hex[:8]}"
-                conn_client["tasks"].append({
-                    "id": task_id,
-                    "action": "DISPATCH_VOUCHERS",
-                    "payload": {"vouchers": [{"id": name, "xml": ledger_xml}]}
-                })
+            conn_client = get_connector(username)
+            if conn_client.get("activeCompany") and "Offline" not in conn_client["activeCompany"]:
+                active_company = conn_client["activeCompany"]
 
-            json_response(self, {"ok": True, "name": name, "parent": parent})
+            safe_name = escape(name)
+            safe_parent = escape(parent or "Sundry Debtors")
+            safe_opening = escape(opening_bal or "0")
+
+            comp_tag = ""
+            if active_company and "Offline" not in active_company and "Not Detected" not in active_company and active_company != "Test Company":
+                comp_tag = f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape(active_company)}</SVCURRENTCOMPANY></STATICVARIABLES>"
+
+            ledger_xml = f"""<ENVELOPE>
+  <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
+  <BODY><IMPORTDATA>
+    <REQUESTDESC><REPORTNAME>All Masters</REPORTNAME>{comp_tag}</REQUESTDESC>
+    <REQUESTDATA><TALLYMESSAGE xmlns:UDF="TallyUDF">
+      <LEDGER NAME="{safe_name}" ACTION="Create">
+        <NAME.LIST><NAME>{safe_name}</NAME></NAME.LIST>
+        <PARENT>{safe_parent}</PARENT>
+        <ISBILLWISEON>No</ISBILLWISEON>
+        <AFFECTSSTOCK>No</AFFECTSSTOCK>
+        <OPENINGBALANCE>{safe_opening}</OPENINGBALANCE>
+      </LEDGER>
+    </TALLYMESSAGE></REQUESTDATA>
+  </IMPORTDATA></BODY>
+</ENVELOPE>"""
+
+            # 1. Queue task for outbound Desktop Connector
+            task_id = f"ledger_{uuid.uuid4().hex[:8]}"
+            conn_client["tasks"].append({
+                "id": task_id,
+                "action": "CREATE_LEDGER",
+                "payload": {"name": name, "parent": parent, "xml": ledger_xml}
+            })
+
+            # 2. Direct post if running on local machine
+            direct_ok = False
+            if tally_status(username)["online"]:
+                d_ok, _ = tally_post(ledger_xml, timeout=3.0)
+                direct_ok = d_ok
+
+            json_response(self, {
+                "ok": True,
+                "name": name,
+                "parent": parent,
+                "directPost": direct_ok,
+                "queuedForConnector": True,
+                "message": f"Ledger '{name}' saved and dispatched to TallyPrime."
+            })
             return
 
         if self.path.startswith("/api/bank-statement/send-tally"):
@@ -3940,10 +3977,23 @@ class DestockHandler(SimpleHTTPRequestHandler):
             data = read_json(self)
             name = str(data.get("name") or "").strip()
             master_type = str(data.get("type") or "ledger").strip()
+            username = str(data.get("username") or "guest-01").strip()
             if not name:
                 json_response(self, {"error": "Master name is required."}, 400)
                 return
-            tally_message = "Saved locally."
+
+            conn_client = get_connector(username)
+            with db() as conn:
+                comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
+                active_company = comp_row["value"] if comp_row else ""
+            if conn_client.get("activeCompany") and "Offline" not in conn_client["activeCompany"]:
+                active_company = conn_client["activeCompany"]
+
+            comp_tag = ""
+            if active_company and "Offline" not in active_company and "Not Detected" not in active_company and active_company != "Test Company":
+                comp_tag = f"<STATICVARIABLES><SVCURRENTCOMPANY>{escape(active_company)}</SVCURRENTCOMPANY></STATICVARIABLES>"
+
+            tally_message = "Dispatched to Tally Connector for creation in TallyPrime."
             built_xml = ""
             if master_type == "ledger":
                 parent = str(data.get("parent") or "Sundry Creditors").strip() or "Sundry Creditors"
@@ -3976,42 +4026,50 @@ class DestockHandler(SimpleHTTPRequestHandler):
                     gst_duty_type=gst_duty_type,
                     tax_rate=tax_rate
                 )
-                ok, response = tally_import_master_xml(built_xml) if tally_status()["online"] else (False, "")
-                tally_message = "Created in Tally." if ok and not tally_response_has_error(response) else f"Saved locally; Tally did not confirm ledger creation. Details: {response}"
             elif master_type == "unit":
                 built_xml = build_unit_master_xml(name)
-                ok, response = tally_import_master_xml(built_xml) if tally_status()["online"] else (False, "")
-                tally_message = "Created in Tally." if ok and not tally_response_has_error(response) else "Saved locally; Tally did not confirm unit creation."
             elif master_type == "stock_group":
                 parent = str(data.get("parent") or "Primary").strip() or "Primary"
                 built_xml = build_stock_group_master_xml(name, parent)
-                ok, response = tally_import_master_xml(built_xml) if tally_status()["online"] else (False, "")
-                tally_message = "Created in Tally." if ok and not tally_response_has_error(response) else "Saved locally; Tally did not confirm stock group creation."
             elif master_type == "stock_category":
                 parent = str(data.get("parent") or "Primary").strip() or "Primary"
                 built_xml = build_stock_category_master_xml(name, parent)
-                ok, response = tally_import_master_xml(built_xml) if tally_status()["online"] else (False, "")
-                tally_message = "Created in Tally." if ok and not tally_response_has_error(response) else "Saved locally; Tally did not confirm stock category creation."
             elif master_type == "godown":
                 parent = str(data.get("parent") or "Primary").strip() or "Primary"
                 built_xml = build_godown_master_xml(name, parent)
-                ok, response = tally_import_master_xml(built_xml) if tally_status()["online"] else (False, "")
-                tally_message = "Created in Tally." if ok and not tally_response_has_error(response) else "Saved locally; Tally did not confirm godown creation."
             elif master_type == "stock_item":
                 unit = str(data.get("unit") or "Nos").strip() or "Nos"
                 parent = str(data.get("parent") or "").strip()
-                if tally_status()["online"]:
-                    tally_import_master_xml(build_unit_master_xml(unit))
-                    built_xml = build_stock_item_master_xml(name, unit, parent)
-                    ok, response = tally_import_master_xml(built_xml)
-                    tally_message = "Created in Tally." if ok and not tally_response_has_error(response) else "Saved locally; Tally did not confirm stock item creation."
-                else:
-                    built_xml = build_stock_item_master_xml(name, unit, parent)
+                built_xml = build_stock_item_master_xml(name, unit, parent)
                 with db() as conn:
                     conn.execute(
                         "INSERT OR IGNORE INTO masters(type, name, parent, raw_xml, updated_at) VALUES('unit', ?, '', ?, ?)",
                         (unit, build_unit_master_xml(unit), now_iso()),
                     )
+
+            full_master_xml = f"""<ENVELOPE>
+  <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
+  <BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>All Masters</REPORTNAME>{comp_tag}</REQUESTDESC>
+  <REQUESTDATA><TALLYMESSAGE xmlns:UDF="TallyUDF">{built_xml}</TALLYMESSAGE></REQUESTDATA>
+  </IMPORTDATA></BODY>
+</ENVELOPE>"""
+
+            # 1. Queue for desktop connector (outbound task queue)
+            task_id = f"master_{uuid.uuid4().hex[:8]}"
+            conn_client["tasks"].append({
+                "id": task_id,
+                "action": "CREATE_MASTER",
+                "payload": {"name": name, "type": master_type, "xml": full_master_xml}
+            })
+
+            # 2. Also try direct post if local XML gateway is reachable
+            if tally_status(username)["online"]:
+                ok, response = tally_post(full_master_xml, timeout=3.0)
+                if ok and not tally_response_has_error(response):
+                    tally_message = "Created in TallyPrime directly."
+                else:
+                    tally_message = "Dispatched to Tally Connector for creation in TallyPrime."
+
             with db() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO masters(type, name, parent, raw_xml, updated_at) VALUES(?, ?, ?, ?, ?)",
