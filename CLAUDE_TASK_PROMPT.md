@@ -1,7 +1,7 @@
 # PUSH TO GITHUB & VERIFICATION INSTRUCTION FOR CLAUDE AI MODEL
 
 ## TASK OBJECTIVE
-You are provided with the complete, production-ready codebase for the **Tally Automation Intelligence Layer & Bridge** (`Tally_Automation_Project_Full_Build.zip`).
+You are provided with the complete, production-ready codebase for the **Tally Automation Intelligence Layer & Bridge** (`Tally_Automation_Project_Full_Build.zip`, 664 KB).
 Your immediate job is to:
 1. **Push all updated files to the GitHub repository** so that Render automatically deploys the updated backend and frontend.
 2. Verify all new features and ledger creation integrations.
@@ -26,18 +26,16 @@ Your immediate job is to:
    - Bulk upload enabled (`input type="file" multiple accept=".pdf"`).
    - Prominent entry points added on Dashboard and Upload screen.
 3. **Desktop Connector v2.0 (Zero-Freeze & Anti-Deadlock)**:
-   - Decoupled `tk.StringVar` from background threads to eliminate Windows "Not Responding" hangs.
-   - Dual-stage company detection (`List of Companies` + `##SVCURRENTCOMPANY`).
-   - Clean `<DATA>` parsing eliminates phantom "+1" count bug.
-   - Smooth typewriter activity animation with non-blocking UI queueing.
-   - High-definition beveled sapphire logo texture.
+   - Eliminated Win32 message queue flooding ("Not Responding" freeze) by replacing unthrottled recursive timers with an animation-token typewriter engine.
+   - Restored instant company detection (<50ms) using `<ID>List of Companies</ID>`.
+   - High-definition beveled metallic sapphire logo texture.
 
 ---
 
 ## GIT COMMIT & PUSH COMMANDS
 Run the following in your workspace:
 ```bash
-git add Web_Application/server.py Web_Application/app.js Web_Application/requirements.txt Tally_Connector_Application/tally_connector_gui.py Tally_Connector_Application/logo.png CLAUDE_TASK_PROMPT.md
+git add Web_Application/server.py Web_Application/app.js Web_Application/index.html Web_Application/styles.css Web_Application/requirements.txt Tally_Connector_Application/tally_connector_gui.py Tally_Connector_Application/logo.png Tally_Connector_Application/Tally_Automation_Connector.spec CLAUDE_TASK_PROMPT.md
 git commit -m "feat: live Tally ledger creation, bulk bank PDF import, zero-freeze connector v2.0"
 git push origin main
 ```

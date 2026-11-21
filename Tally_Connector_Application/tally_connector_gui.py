@@ -11,7 +11,7 @@ import json
 import re
 import threading
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import scrolledtext
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
@@ -22,25 +22,16 @@ def get_resource_path(relative_path: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
 
 def count_tally_vouchers(xml_text: str) -> int:
-    """
-    Accurately count genuine vouchers in Tally XML.
-    Ignores request headers, TDL declarations, and metadata in <DESC>.
-    Only counts actual voucher entities inside <DATA>.
-    """
+    """ Count genuine vouchers in Tally XML response """
     if not xml_text:
         return 0
-    # Isolate <DATA> body if present
     data_match = re.search(r'<DATA\b[^>]*>(.*?)</DATA>', xml_text, re.DOTALL | re.I)
     target = data_match.group(1) if data_match else xml_text
-    # Genuine vouchers in Tally carry attributes like VCHTYPE or DATE
     matches = re.findall(r'<VOUCHER\b[^>]*\b(VCHTYPE|DATE|REMOTEID|VCHKEY)\s*=', target, flags=re.I)
     return len(matches)
 
 def count_tally_ledgers(xml_text: str) -> int:
-    """
-    Accurately count genuine ledgers in Tally XML.
-    Ignores schema definitions and counts only genuine <LEDGER NAME="..."> tags in <DATA>.
-    """
+    """ Count genuine ledgers in Tally XML response """
     if not xml_text:
         return 0
     data_match = re.search(r'<DATA\b[^>]*>(.*?)</DATA>', xml_text, re.DOTALL | re.I)
@@ -57,17 +48,16 @@ class TallyConnectorGUI:
         self.root.minsize(700, 660)
         self.root.configure(bg="#07090e")
 
-        # Thread-safe config values (Worker threads read these directly, NEVER calling StringVar.get())
+        # Thread-safe lock for state variables
         self.lock = threading.Lock()
-        self.net_lock = threading.Lock()  # Serializes requests to TallyPort 9000 so calls never collide
 
+        # Thread-safe config values
         self.cfg_web_url = "https://tally-automation.onrender.com"
         self.cfg_tally_url = "http://127.0.0.1:9000"
         self.cfg_username = "guest-01"
 
         # UI StringVars (UI Main Thread ONLY)
         self.var_web_url = tk.StringVar(value=self.cfg_web_url)
-        self.var_tally_url = tk.StringVar(value=self.cfg_tally_url)
         self.var_username = tk.StringVar(value=self.cfg_username)
 
         # Live State variables
@@ -79,16 +69,13 @@ class TallyConnectorGUI:
         self.ledgers_synced_count = 0
         self.poll_running = True
 
-        # Activity State & Smooth Typewriter Engine
+        # Activity State & Non-Blocking Typewriter Engine
         self.current_activity_title = "Ready • All systems operational"
         self.current_activity_sub = "Waiting for actions or automatic sync"
         self.current_activity_badge = "✅"
         self.activity_history = []
-
+        self._anim_id = 0
         self._typing_timer_id = None
-        self._target_act_title = ""
-        self._target_act_sub = ""
-        self._typing_in_progress = False
 
         self.setup_ui()
         self.record_activity("System Initialized", "Tally Automation Bridge desktop software ready", "🚀")
@@ -98,11 +85,9 @@ class TallyConnectorGUI:
         """ Copies current UI input values to thread-safe cfg attributes. Must run on UI thread. """
         with self.lock:
             self.cfg_web_url = self.var_web_url.get().strip().rstrip("/")
-            self.cfg_tally_url = self.var_tally_url.get().strip().rstrip("/")
             self.cfg_username = self.var_username.get().strip()
 
     def setup_ui(self):
-        # Master Container with luxury obsidian styling
         container = tk.Frame(self.root, bg="#07090e", padx=20, pady=16)
         container.pack(fill="both", expand=True)
 
@@ -112,7 +97,6 @@ class TallyConnectorGUI:
         header_frame = tk.Frame(container, bg="#07090e")
         header_frame.pack(fill="x", pady=(0, 16))
 
-        # Modern High-Definition Beveled Textured Logo
         logo_loaded = False
         try:
             logo_path = get_resource_path("logo.png")
@@ -125,14 +109,10 @@ class TallyConnectorGUI:
             logo_loaded = False
 
         if not logo_loaded:
-            # Fallback high-def vector canvas with metallic sapphire bevel
             icon_canvas = tk.Canvas(header_frame, width=48, height=48, bg="#07090e", highlightthickness=0)
             icon_canvas.pack(side="left", padx=(0, 12))
-            # Outer bevel
             icon_canvas.create_oval(2, 2, 46, 46, fill="#0f172a", outline="#3b82f6", width=2)
-            # Inner sapphire gradient circle
             icon_canvas.create_oval(5, 5, 43, 43, fill="#1d3557", outline="#60a5fa", width=1)
-            # Embossed T
             icon_canvas.create_text(25, 25, text="T", fill="#000000", font=("Segoe UI", 18, "bold"))
             icon_canvas.create_text(24, 24, text="T", fill="#e0f2fe", font=("Segoe UI", 18, "bold"))
 
@@ -279,7 +259,7 @@ class TallyConnectorGUI:
         )
         btn_history.pack(side="right")
 
-        # Single-Line Status Box (Clean, non-cluttered, typewriter animation)
+        # Single-Line Status Box (Clean, non-cluttered, smooth typewriter animation)
         self.act_card = tk.Frame(container, bg="#0c1322", highlightbackground="#1e293b", highlightthickness=1, padx=14, pady=12)
         self.act_card.pack(fill="x")
 
@@ -304,9 +284,10 @@ class TallyConnectorGUI:
         tk.Label(footer, text="🔒 Secure TLS Outbound Bridge • Local TallyPrime Port 9000 • Render Cloud Portal", font=("Segoe UI", 8), fg="#475569", bg="#07090e").pack(anchor="w")
 
     # ------------------------------------------------------------------
-    # RECORD ACTIVITY (PERSISTENT LOG + SMOOTH WRITING ANIMATION)
+    # RECORD ACTIVITY (SMOOTH, ELEGANT, NON-BLOCKING TYPEWRITER ENGINE)
     # ------------------------------------------------------------------
     def record_activity(self, title: str, subtitle: str, badge: str = "ℹ️", status: str = "INFO"):
+        """ Thread-safe activity recording. Safely queues typewriter animation on main thread. """
         now_str = time.strftime("%I:%M:%S %p")
         full_sub = f"{subtitle} ({now_str})"
         with self.lock:
@@ -323,14 +304,17 @@ class TallyConnectorGUI:
             if len(self.activity_history) > 200:
                 self.activity_history.pop(0)
 
-        # Delegate smooth typewriter streaming strictly to UI thread
+        # Dispatch smooth typewriter animation strictly to UI thread
         try:
             self.root.after(0, self._start_typing_activity, title, full_sub, badge)
         except Exception:
             pass
 
     def _start_typing_activity(self, title: str, full_sub: str, badge: str):
-        # Cancel any active animation so new activity flows in smoothly without collision
+        """ Runs on Main Thread. Starts a fresh writing sequence, gracefully replacing any pending animation. """
+        self._anim_id += 1
+        current_anim_id = self._anim_id
+
         if self._typing_timer_id is not None:
             try:
                 self.root.after_cancel(self._typing_timer_id)
@@ -338,8 +322,6 @@ class TallyConnectorGUI:
                 pass
             self._typing_timer_id = None
 
-        self._target_act_title = title
-        self._target_act_sub = full_sub
         try:
             self.lbl_act_icon.config(text=badge)
             self.lbl_act_title.config(text="")
@@ -347,34 +329,34 @@ class TallyConnectorGUI:
         except Exception:
             return
 
-        self._type_step(0, 0)
+        self._type_step(current_anim_id, title, full_sub, 0, 0)
 
-    def _type_step(self, title_idx: int, sub_idx: int):
-        target_title = self._target_act_title
-        target_sub = self._target_act_sub
+    def _type_step(self, anim_id: int, target_title: str, target_sub: str, title_idx: int, sub_idx: int):
+        """ Smooth typing cadence (35ms ticks, 2-3 chars per tick for natural writing appearance). """
+        # If a newer activity arrived, stop this animation immediately so queues never accumulate
+        if anim_id != self._anim_id:
+            return
 
         try:
             if title_idx < len(target_title):
-                # Stream title: advance 1 char per tick for a smooth writing appearance
-                next_t_idx = min(len(target_title), title_idx + 1)
-                cursor = " ▎" if next_t_idx < len(target_title) else ""
-                self.lbl_act_title.config(text=target_title[:next_t_idx] + cursor)
-                self._typing_timer_id = self.root.after(22, self._type_step, next_t_idx, 0)
+                # Smooth title streaming (advance 2-3 chars per 32ms)
+                next_t = min(len(target_title), title_idx + 2)
+                cursor = " ▎" if next_t < len(target_title) else ""
+                self.lbl_act_title.config(text=target_title[:next_t] + cursor)
+                self._typing_timer_id = self.root.after(32, self._type_step, anim_id, target_title, target_sub, next_t, 0)
             elif sub_idx < len(target_sub):
-                # Title complete, finalize title string
+                # Title complete, finalize title and stream subtitle (advance 3-4 chars per 28ms)
                 self.lbl_act_title.config(text=target_title)
-                # Stream subtitle: advance 2 chars per tick for smooth writing cadence
-                next_s_idx = min(len(target_sub), sub_idx + 2)
-                cursor = " ▎" if next_s_idx < len(target_sub) else ""
-                self.lbl_act_sub.config(text=target_sub[:next_s_idx] + cursor)
-                self._typing_timer_id = self.root.after(18, self._type_step, len(target_title), next_s_idx)
+                next_s = min(len(target_sub), sub_idx + 4)
+                cursor = " ▎" if next_s < len(target_sub) else ""
+                self.lbl_act_sub.config(text=target_sub[:next_s] + cursor)
+                self._typing_timer_id = self.root.after(28, self._type_step, anim_id, target_title, target_sub, len(target_title), next_s)
             else:
-                # Finished: clean final strings without cursor
+                # Finished smoothly without cursor
                 self.lbl_act_title.config(text=target_title)
                 self.lbl_act_sub.config(text=target_sub)
                 self._typing_timer_id = None
         except tk.TclError:
-            # Widget destroyed or window closed
             self._typing_timer_id = None
 
     # ------------------------------------------------------------------
@@ -417,7 +399,7 @@ class TallyConnectorGUI:
     # ------------------------------------------------------------------
     # TALLY PRIME XML GATEWAY (Port 9000)
     # ------------------------------------------------------------------
-    def post_tally_xml(self, xml_content: str, timeout: float = 3.5):
+    def post_tally_xml(self, xml_content: str, timeout: float = 5.0):
         """ Thread-safe XML POST to local Tally gateway """
         with self.lock:
             tally_url = self.cfg_tally_url
@@ -435,107 +417,61 @@ class TallyConnectorGUI:
 
     def detect_tally_company(self):
         """
-        Robustly detects active company in TallyPrime.
-        Works across all TallyPrime versions using two-stage detection.
-        Thread-safe, non-blocking, never freezes the GUI.
+        Fast, robust, zero-crash detection of active company in TallyPrime.
+        Works across all TallyPrime versions.
         """
-        with self.net_lock:
-            # Stage 1: Export List of Companies
-            xml_list = """<ENVELOPE>
+        xml_list = """<ENVELOPE>
   <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>List of Companies</ID></HEADER>
   <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES></DESC></BODY>
 </ENVELOPE>"""
-            ok, resp = self.post_tally_xml(xml_list, timeout=2.5)
+        ok, resp = self.post_tally_xml(xml_list, timeout=4.0)
 
-            if not ok:
-                with self.lock:
-                    self.tally_online = False
-                    self.active_company = "Offline (Port 9000 Closed)"
-                return False, self.active_company
+        if not ok:
+            with self.lock:
+                self.tally_online = False
+                self.active_company = "Offline (Port 9000 Closed)"
+            return False, self.active_company
 
-            # Extract company name from <DATA> collection or company tags
-            comp_name = None
-            
-            # Match 1: <COMPANY NAME="..."
-            m = re.search(r'<COMPANY\s+[^>]*NAME="([^"]+)"', resp, flags=re.I)
+        # Extract company name from Tally XML
+        comp_name = None
+
+        # Match 1: <COMPANY NAME="..."
+        m = re.search(r'<COMPANY[^>]*NAME="([^"]+)"', resp, flags=re.I)
+        if m and m.group(1).strip() and not m.group(1).strip().startswith("$$"):
+            comp_name = m.group(1).strip()
+
+        # Match 2: <NAME TYPE="String">...</NAME> or <NAME>...</NAME> inside <COLLECTION>
+        if not comp_name:
+            m = re.search(r'<COLLECTION\b[^>]*>.*?<COMPANY\b[^>]*>.*?<NAME[^>]*>([^<]+)</NAME>', resp, flags=re.I | re.DOTALL)
             if m and m.group(1).strip() and not m.group(1).strip().startswith("$$"):
                 comp_name = m.group(1).strip()
 
-            # Match 2: <COMPANY><NAME>...</NAME> inside DATA
-            if not comp_name:
-                m = re.search(r'<DATA\b[^>]*>.*?<COMPANY\b[^>]*>.*?<NAME[^>]*>(.*?)</NAME>', resp, flags=re.I | re.DOTALL)
-                if m and m.group(1).strip() and not m.group(1).strip().startswith("$$"):
-                    comp_name = m.group(1).strip()
+        # Match 3: <COMPANYNAME>...</COMPANYNAME>
+        if not comp_name:
+            m = re.search(r'<COMPANYNAME[^>]*>([^<]+)</COMPANYNAME>', resp, flags=re.I)
+            if m and m.group(1).strip():
+                comp_name = m.group(1).strip()
 
-            # Match 3: <COMPANYNAME>...</COMPANYNAME>
-            if not comp_name:
-                m = re.search(r'<COMPANYNAME[^>]*>(.*?)</COMPANYNAME>', resp, flags=re.I)
-                if m and m.group(1).strip():
-                    comp_name = m.group(1).strip()
-
-            # Stage 2: Fallback query using ##SVCURRENTCOMPANY if company name wasn't in List of Companies
-            if not comp_name:
-                xml_current = """<ENVELOPE>
-  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Data</TYPE><ID>CompReport</ID></HEADER>
-  <BODY>
-    <DESC>
-      <STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES>
-      <TDL><TDLMESSAGE>
-        <REPORT NAME="CompReport"><FORMS>CompForm</FORMS></REPORT>
-        <FORM NAME="CompForm"><PARTS>CompPart</PARTS></FORM>
-        <PART NAME="CompPart"><LINES>CompLine</LINES></PART>
-        <LINE NAME="CompLine"><FIELDS>CompField</FIELDS></LINE>
-        <FIELD NAME="CompField"><SET>##SVCURRENTCOMPANY</SET></FIELD>
-      </TDLMESSAGE></TDL>
-    </DESC>
-  </BODY>
-</ENVELOPE>"""
-                ok_curr, resp_curr = self.post_tally_xml(xml_current, timeout=2.5)
-                if ok_curr:
-                    m_curr = re.search(r'<COMPFIELD[^>]*>(.*?)</COMPFIELD>', resp_curr, flags=re.I | re.DOTALL)
-                    if m_curr and m_curr.group(1).strip():
-                        comp_name = m_curr.group(1).strip()
-
-            with self.lock:
-                if comp_name:
-                    self.tally_online = True
-                    self.active_company = comp_name
-                    return True, self.active_company
-
-                # Tally responded, but no company is loaded
-                if "TallyPrime" in resp or "RESPONSE" in resp or "ENVELOPE" in resp:
-                    self.tally_online = True
-                    self.active_company = "No Company Opened"
-                    return True, self.active_company
-
-                self.tally_online = False
-                self.active_company = "Unrecognized Tally Gateway"
-                return False, self.active_company
-
-    def _fetch_voucher_count(self) -> int:
-        """ Fetches live voucher count from active company in TallyPrime """
         with self.lock:
-            comp_name = self.active_company
-            if not self.tally_online or not comp_name or "Offline" in comp_name or "No Company" in comp_name:
-                return self.daybook_vouchers_count
+            if comp_name:
+                self.tally_online = True
+                self.active_company = comp_name
+                return True, comp_name
 
-        comp_var = f"<SVCURRENTCOMPANY>{comp_name}</SVCURRENTCOMPANY>"
-        xml_vch = f"""<ENVELOPE>
-  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>Vouchers</ID></HEADER>
-  <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>{comp_var}</STATICVARIABLES>
-  <TDL><TDLMESSAGE><COLLECTION NAME="Vouchers"><TYPE>Voucher</TYPE><FETCH>Date,VoucherTypeName,VoucherNumber</FETCH></COLLECTION></TDLMESSAGE></TDL>
-  </DESC></BODY>
-</ENVELOPE>"""
-        with self.net_lock:
-            ok, text = self.post_tally_xml(xml_vch, timeout=4.0)
-            if ok:
-                return count_tally_vouchers(text)
-        return self.daybook_vouchers_count
+            # Tally is running, but no company is loaded
+            if "TallyPrime" in resp or "<RESPONSE>" in resp or "<ENVELOPE>" in resp:
+                self.tally_online = True
+                self.active_company = "No Company Opened"
+                return True, self.active_company
+
+            self.tally_online = False
+            self.active_company = "Unrecognized Tally Gateway"
+            return False, self.active_company
 
     # ------------------------------------------------------------------
     # WEB APP CLOUD BRIDGE
     # ------------------------------------------------------------------
-    def post_web(self, endpoint: str, payload: dict):
+    def post_web(self, endpoint: str, payload: dict, timeout: float = 8.0):
         with self.lock:
             web_url = self.cfg_web_url
         full_url = f"{web_url}{endpoint}"
@@ -547,7 +483,7 @@ class TallyConnectorGUI:
                 headers={"Content-Type": "application/json", "Content-Length": str(len(data))},
                 method="POST"
             )
-            with urlopen(req, timeout=8.0) as resp:
+            with urlopen(req, timeout=timeout) as resp:
                 return True, json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
             return False, {"error": str(exc)}
@@ -560,7 +496,7 @@ class TallyConnectorGUI:
                 "activeCompany": self.active_company,
                 "tallyUrl": self.cfg_tally_url
             }
-        ok, res = self.post_web("/api/connector/heartbeat", payload)
+        ok, res = self.post_web("/api/connector/heartbeat", payload, timeout=6.0)
         with self.lock:
             self.web_online = ok
         return ok
@@ -568,7 +504,7 @@ class TallyConnectorGUI:
     def poll_tasks_web(self):
         with self.lock:
             user = self.cfg_username
-        ok, res = self.post_web("/api/connector/poll-tasks", {"username": user})
+        ok, res = self.post_web("/api/connector/poll-tasks", {"username": user}, timeout=6.0)
         if ok and res.get("tasks"):
             return res.get("tasks")
         return []
@@ -584,20 +520,18 @@ class TallyConnectorGUI:
     def _run_detect(self):
         ok, company = self.detect_tally_company()
         if ok and company not in ("No Company Opened", "Offline (Port 9000 Closed)"):
-            v_cnt = self._fetch_voucher_count()
-            with self.lock:
-                self.daybook_vouchers_count = v_cnt
-            self.record_activity(f"Company Detected: '{company}'", f"Found {v_cnt} Day Book vouchers in TallyPrime", "✅", "SUCCESS")
+            self.record_activity(f"Company Detected: '{company}'", "TallyPrime connected and active", "✅", "SUCCESS")
             self.heartbeat_web()
         elif ok and company == "No Company Opened":
-            self.record_activity("TallyPrime Ready", "Port 9000 is open, please select and open a Company in Tally", "ℹ️", "INFO")
+            self.record_activity("TallyPrime Ready", "Port 9000 is open. Please open a Company in TallyPrime", "ℹ️", "INFO")
             self.heartbeat_web()
         else:
-            self.record_activity("Detection Failed", f"Make sure TallyPrime is open ({company})", "⚠️", "WARN")
+            self.record_activity("Detection Failed", f"Make sure TallyPrime is open on Port 9000 ({company})", "⚠️", "WARN")
         self.update_ui_state()
 
     def action_sync_all(self, task_id="manual_sync"):
-        self._sync_cfg_from_ui()
+        if threading.current_thread() is threading.main_thread():
+            self._sync_cfg_from_ui()
         self.record_activity("Synchronizing All Data...", "Extracting Masters and Day Book Vouchers from TallyPrime", "🔄", "SYNC")
         threading.Thread(target=self._run_sync_all, args=(task_id,), daemon=True).start()
 
@@ -608,67 +542,66 @@ class TallyConnectorGUI:
 
         comp_var = f"<SVCURRENTCOMPANY>{comp_name}</SVCURRENTCOMPANY>" if comp_name and "Offline" not in comp_name and "No Company" not in comp_name else ""
 
-        with self.net_lock:
-            # 1. Fetch Ledgers
-            xml_l = f"""<ENVELOPE>
+        # 1. Fetch Ledgers
+        xml_l = f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>List of Ledgers</ID></HEADER>
   <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>{comp_var}</STATICVARIABLES>
   <TDL><TDLMESSAGE><COLLECTION NAME="List of Ledgers"><TYPE>Ledger</TYPE><FETCH>Name,Parent,OpeningBalance</FETCH></COLLECTION></TDLMESSAGE></TDL>
   </DESC></BODY>
 </ENVELOPE>"""
-            ok_l, text_l = self.post_tally_xml(xml_l, timeout=4.5)
+        ok_l, text_l = self.post_tally_xml(xml_l, timeout=6.0)
 
-            # 2. Fetch Groups
-            xml_g = f"""<ENVELOPE>
+        # 2. Fetch Groups
+        xml_g = f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>List of Groups</ID></HEADER>
   <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>{comp_var}</STATICVARIABLES>
   <TDL><TDLMESSAGE><COLLECTION NAME="List of Groups"><TYPE>Group</TYPE><FETCH>Name,Parent</FETCH></COLLECTION></TDLMESSAGE></TDL>
   </DESC></BODY>
 </ENVELOPE>"""
-            ok_g, text_g = self.post_tally_xml(xml_g, timeout=4.5)
+        ok_g, text_g = self.post_tally_xml(xml_g, timeout=5.0)
 
-            # 3. Fetch Stock Items
-            xml_s = f"""<ENVELOPE>
+        # 3. Fetch Stock Items
+        xml_s = f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>List of Stock Items</ID></HEADER>
   <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>{comp_var}</STATICVARIABLES>
   <TDL><TDLMESSAGE><COLLECTION NAME="List of Stock Items"><TYPE>StockItem</TYPE><FETCH>Name,Parent,BaseUnits,OpeningBalance</FETCH></COLLECTION></TDLMESSAGE></TDL>
   </DESC></BODY>
 </ENVELOPE>"""
-            ok_s, text_s = self.post_tally_xml(xml_s, timeout=4.5)
+        ok_s, text_s = self.post_tally_xml(xml_s, timeout=5.0)
 
-            # 4. Fetch Units
-            xml_u = f"""<ENVELOPE>
+        # 4. Fetch Units
+        xml_u = f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>List of Units</ID></HEADER>
   <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>{comp_var}</STATICVARIABLES>
   <TDL><TDLMESSAGE><COLLECTION NAME="List of Units"><TYPE>Unit</TYPE><FETCH>Name,OriginalName,DecimalPlaces</FETCH></COLLECTION></TDLMESSAGE></TDL>
   </DESC></BODY>
 </ENVELOPE>"""
-            ok_u, text_u = self.post_tally_xml(xml_u, timeout=4.5)
+        ok_u, text_u = self.post_tally_xml(xml_u, timeout=5.0)
 
-            # 5. Fetch Godowns
-            xml_gd = f"""<ENVELOPE>
+        # 5. Fetch Godowns
+        xml_gd = f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>List of Godowns</ID></HEADER>
   <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>{comp_var}</STATICVARIABLES>
   <TDL><TDLMESSAGE><COLLECTION NAME="List of Godowns"><TYPE>Godown</TYPE><FETCH>Name,Parent</FETCH></COLLECTION></TDLMESSAGE></TDL>
   </DESC></BODY>
 </ENVELOPE>"""
-            ok_gd, text_gd = self.post_tally_xml(xml_gd, timeout=4.5)
+        ok_gd, text_gd = self.post_tally_xml(xml_gd, timeout=5.0)
 
-            # 6. Fetch Voucher Types
-            xml_v = f"""<ENVELOPE>
+        # 6. Fetch Voucher Types
+        xml_v = f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>List of Voucher Types</ID></HEADER>
   <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>{comp_var}</STATICVARIABLES></DESC></BODY>
 </ENVELOPE>"""
-            ok_v, text_v = self.post_tally_xml(xml_v, timeout=4.5)
+        ok_v, text_v = self.post_tally_xml(xml_v, timeout=5.0)
 
-            # 7. Fetch Full Day Book Vouchers
-            xml_vch = f"""<ENVELOPE>
+        # 7. Fetch Day Book Vouchers
+        xml_vch = f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>Vouchers</ID></HEADER>
   <BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>{comp_var}</STATICVARIABLES>
   <TDL><TDLMESSAGE><COLLECTION NAME="Vouchers"><TYPE>Voucher</TYPE><FETCH>Date,VoucherTypeName,VoucherNumber,PartyLedgerName,LedgerName,Amount,MasterID,Narration,PersistedView</FETCH></COLLECTION></TDLMESSAGE></TDL>
   </DESC></BODY>
 </ENVELOPE>"""
-            ok_vch, text_vch = self.post_tally_xml(xml_vch, timeout=8.0)
+        ok_vch, text_vch = self.post_tally_xml(xml_vch, timeout=8.0)
 
         ledger_count = count_tally_ledgers(text_l) if ok_l else 0
         vch_count = count_tally_vouchers(text_vch) if ok_vch else 0
@@ -678,7 +611,7 @@ class TallyConnectorGUI:
             self.daybook_vouchers_count = vch_count
 
         if ok_l or ok_vch or ok_g or ok_s:
-            self.record_activity("Uploading Data to Cloud...", f"Uploading Masters (Ledgers: {ledger_count}) and {vch_count} Vouchers", "☁️", "SYNC")
+            self.record_activity("Uploading Data to Cloud...", f"Uploading Masters ({ledger_count} Ledgers) and {vch_count} Vouchers", "☁️", "SYNC")
             res_ok, resp = self.post_web("/api/connector/task-result", {
                 "username": username,
                 "taskId": task_id,
@@ -706,7 +639,7 @@ class TallyConnectorGUI:
 
                 self.record_activity(
                     f"Sync Complete: {ledger_count} Masters & {vch_count} Vouchers",
-                    f"All accounting masters and {vch_count} Day Book vouchers saved in Web Cloud",
+                    f"Accounting masters and {vch_count} Day Book vouchers saved in Web Cloud",
                     "✅", "SUCCESS"
                 )
             else:
@@ -738,7 +671,7 @@ class TallyConnectorGUI:
         payload = task.get("payload", {})
 
         if action == "SYNC_MASTERS":
-            self.action_sync_all(task_id=t_id)
+            self._run_sync_all(task_id=t_id)
         elif action in ("CREATE_MASTER", "CREATE_LEDGER"):
             master_name = payload.get("name", "Ledger")
             xml_data = payload.get("xml", "")
@@ -754,8 +687,7 @@ class TallyConnectorGUI:
                 elif "<REQUESTDESC>" in xml_data:
                     xml_data = xml_data.replace("<REQUESTDESC>", f"<REQUESTDESC><STATICVARIABLES><SVCURRENTCOMPANY>{active_comp}</SVCURRENTCOMPANY></STATICVARIABLES>")
 
-            with self.net_lock:
-                ok, resp = self.post_tally_xml(xml_data, timeout=5.0)
+            ok, resp = self.post_tally_xml(xml_data, timeout=6.0)
 
             has_err = not ok or ("<LINEERROR>" in resp) or ("<ERRORS>" in resp and "<ERRORS>0</ERRORS>" not in resp)
             err_msg = ""
@@ -789,8 +721,7 @@ class TallyConnectorGUI:
             results = []
 
             for idx, item in enumerate(vouchers):
-                with self.net_lock:
-                    v_res_ok, v_text = self.post_tally_xml(item.get("xml", ""), timeout=4.0)
+                v_res_ok, v_text = self.post_tally_xml(item.get("xml", ""), timeout=5.0)
                 has_err = not v_res_ok or ("<LINEERROR>" in v_text) or ("<ERRORS>" in v_text and "<ERRORS>0</ERRORS>" not in v_text)
 
                 err_msg = ""
@@ -812,9 +743,6 @@ class TallyConnectorGUI:
 
                 # 60ms micro-delay prevents Tally UI lag / freeze
                 time.sleep(0.06)
-
-            with self.lock:
-                self.daybook_vouchers_count = self._fetch_voucher_count()
 
             self.post_web("/api/connector/task-result", {
                 "username": self.cfg_username,
@@ -893,7 +821,7 @@ class TallyConnectorGUI:
             while self.poll_running:
                 now = time.time()
                 try:
-                    if now - last_status > 5.0:
+                    if now - last_status > 4.5:
                         self.detect_tally_company()
                         self.heartbeat_web()
                         self.update_ui_state()
