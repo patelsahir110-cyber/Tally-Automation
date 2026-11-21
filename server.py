@@ -3846,13 +3846,17 @@ class DestockHandler(SimpleHTTPRequestHandler):
   </IMPORTDATA></BODY>
 </ENVELOPE>"""
 
-            # 1. Queue task for outbound Desktop Connector
+            # 1. Queue task for outbound Desktop Connector (broadcast to all active connectors)
             task_id = f"ledger_{uuid.uuid4().hex[:8]}"
-            conn_client["tasks"].append({
+            task_obj = {
                 "id": task_id,
                 "action": "CREATE_LEDGER",
                 "payload": {"name": name, "parent": parent, "xml": ledger_xml}
-            })
+            }
+            conn_client["tasks"].append(task_obj)
+            for c_user, c_conn in list(CONNECTOR_STATE.items()):
+                if c_user != username:
+                    c_conn["tasks"].append(task_obj)
 
             # 2. Direct post if running on local machine
             direct_ok = False
@@ -3868,6 +3872,16 @@ class DestockHandler(SimpleHTTPRequestHandler):
                 "queuedForConnector": True,
                 "message": f"Ledger '{name}' saved and dispatched to TallyPrime."
             })
+            return
+
+        if self.path.startswith("/api/bank-statement/update-target-ledger"):
+            data = read_json(self)
+            stmt_id = data.get("statementId")
+            b_ledger = (data.get("bankLedger") or "Bank Accounts").strip()
+            if stmt_id:
+                with db() as conn:
+                    conn.execute("UPDATE bank_statements SET bank_ledger=? WHERE id=?", (b_ledger, stmt_id))
+            json_response(self, {"ok": True, "bankLedger": b_ledger})
             return
 
         if self.path.startswith("/api/bank-statement/send-tally"):
@@ -3889,7 +3903,10 @@ class DestockHandler(SimpleHTTPRequestHandler):
                 if not stmt:
                     json_response(self, {"error": "Statement not found"}, 400)
                     return
-                bank_ledger = stmt["bank_ledger"]
+                target_bl = (data.get("targetBankLedger") or "").strip()
+                bank_ledger = target_bl or stmt["bank_ledger"] or "Bank Accounts"
+                if target_bl and target_bl != stmt["bank_ledger"]:
+                    conn.execute("UPDATE bank_statements SET bank_ledger=? WHERE id=?", (target_bl, stmt_id))
                 comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
                 active_company = (comp_row["value"] if comp_row else "") or conn_client.get("activeCompany", "")
 

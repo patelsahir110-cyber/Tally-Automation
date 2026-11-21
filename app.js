@@ -136,7 +136,15 @@ function icon(name) {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, options);
+  const opts = { ...options };
+  if (opts.body && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
+    opts.headers = {
+      "Content-Type": "application/json",
+      ...(opts.headers || {})
+    };
+    opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || (data.errors || []).join(" ") || "Request failed");
   return data;
@@ -4061,16 +4069,16 @@ function toggleBankRowSelect(id) {
 }
 
 async function bulkAssignBankLedger(ledgerName, options = {}) {
-  if (!ledgerName || state.bankImportSelectedIds.length === 0) return;
+  const targetIds = options.targetIds || (state.bankImportSelectedIds.length > 0 ? [...state.bankImportSelectedIds] : (state.bankImportModalRow ? [state.bankImportModalRow.id] : []));
+  if (!ledgerName || targetIds.length === 0) return;
   pushBankImportHistory();
 
-  const targetIds = [...state.bankImportSelectedIds];
   const lock = options.lock !== undefined ? options.lock : true;
   const createRule = Boolean(options.createRule);
   const rulePattern = options.rulePattern || "";
 
   // Optimistic UI update
-  for (const t of state.bankImportTransactions) {
+  for (const t of (state.bankImportTransactions || [])) {
     if (targetIds.includes(t.id)) {
       t.assigned_ledger = ledgerName;
       if (lock) t.is_locked = 1;
@@ -4082,7 +4090,7 @@ async function bulkAssignBankLedger(ledgerName, options = {}) {
     await api("/api/bank-statement/assign", {
       method: "POST",
       body: {
-        statementId: state.bankImportStatement.id,
+        statementId: state.bankImportStatement ? state.bankImportStatement.id : null,
         transactionIds: targetIds,
         ledger: ledgerName,
         lock: lock,
@@ -4217,8 +4225,9 @@ function captureHighlighterSelection() {
 }
 
 async function createLedgerFromHighlighter() {
-  const name = (state.bankImportNewLedgerName || "").trim();
-  const group = state.bankImportNewLedgerGroup || "Sundry Debtors";
+  const nameInput = document.getElementById("highlighter-ledger-name");
+  const name = (nameInput?.value || state.bankImportNewLedgerName || "").trim();
+  const group = state.bankImportNewLedgerGroup || (state.bankImportModalRow?.deposit > 0 ? "Sundry Debtors" : "Indirect Expenses");
   const row = state.bankImportModalRow;
   if (!name || !row) {
     setNotice("Please select or enter a valid ledger name.");
@@ -4226,31 +4235,62 @@ async function createLedgerFromHighlighter() {
   }
 
   try {
-    const res = await api("/api/bank-statement/create-ledger", {
+    // 1. Create in TallyPrime via /api/tally/create-master (uses verified master creation pipeline)
+    const res = await api("/api/tally/create-master", {
       method: "POST",
-      body: { name, parent: group, username: state.user?.username || "guest-01" },
+      body: {
+        type: "ledger",
+        name: name,
+        parent: group,
+        username: state.user?.username || "guest-01",
+        billwiseOn: "No",
+        openingBalance: "0"
+      }
     });
 
-    if (res && res.ok) {
-      // Refresh masters so the new ledger appears everywhere
-      const refreshedMasters = await api("/api/masters");
-      state.masters = refreshedMasters;
+    // 2. Quietly refresh masters so the new ledger is immediately in dropdowns
+    await syncMastersQuietly();
+    await refreshAll();
 
-      // Assign to current row and lock
-      await bulkAssignBankLedger(name, {
-        lock: true,
-        createRule: true,
-        rulePattern: state.bankImportHighlightedText || name,
-      });
+    // 3. Assign to the current row and create auto-rule
+    await bulkAssignBankLedger(name, {
+      targetIds: [row.id],
+      lock: true,
+      createRule: true,
+      rulePattern: state.bankImportHighlightedText || name,
+    });
 
-      closeNarrationHighlighter();
-      setNotice(`Ledger "${name}" created in TallyPrime and assigned!`);
-    } else {
-      setNotice(res?.error || "Failed to create ledger");
-    }
+    closeNarrationHighlighter();
+    setNotice(`Ledger "${name}" created in TallyPrime and assigned to transaction!`);
+    render();
   } catch (err) {
     setNotice("Create ledger error: " + err.message);
   }
+}
+
+async function handleBankTargetLedgerChange(val) {
+  if (val === "__CREATE_NEW__") {
+    promptCreateLedger("Bank Accounts");
+    return;
+  }
+  state.bankImportTargetLedger = val;
+  localStorage.setItem("tally_bank_target_ledger", val);
+
+  if (state.bankImportStatement?.id) {
+    try {
+      await api("/api/bank-statement/update-target-ledger", {
+        method: "POST",
+        body: {
+          statementId: state.bankImportStatement.id,
+          bankLedger: val
+        }
+      });
+      state.bankImportStatement.bank_ledger = val;
+    } catch (e) {
+      console.warn("Failed to update target bank ledger:", e);
+    }
+  }
+  render();
 }
 
 async function sendBankVouchersToTally(mode) {
@@ -4295,6 +4335,7 @@ async function sendBankVouchersToTally(mode) {
       body: {
         statementId: state.bankImportStatement.id,
         transactionIds: targets,
+        targetBankLedger: state.bankImportTargetLedger || "Bank Accounts",
         username: "guest-01",
       },
     });
@@ -4591,8 +4632,30 @@ function bankImportScreen() {
   const stmt = state.bankImportStatement;
   const allTxns = state.bankImportTransactions || [];
 
-  // Bank ledgers dropdown options
-  const bankLedgers = (state.masters?.masters || []).filter((m) => m.type === "ledger" && (m.parent.toLowerCase().includes("bank") || m.name.toLowerCase().includes("bank")));
+  // Bank ledgers dropdown options - Intelligent multi-tier matching
+  let bankLedgers = (state.masters?.masters || []).filter((m) => {
+    if (m.type !== "ledger") return false;
+    const p = (m.parent || "").toLowerCase();
+    const n = (m.name || "").toLowerCase();
+    return p.includes("bank") || n.includes("bank") || p.includes("od") || p.includes("occ") || n.includes("a/c") || n.includes("account");
+  });
+
+  if (bankLedgers.length === 0) {
+    bankLedgers = (state.masters?.masters || []).filter((m) => m.type === "ledger");
+  }
+
+  // Prepend recognized bank account standards if not already present
+  const standardBankDefaults = ["Bank Accounts", "ICICI Bank", "HDFC Bank", "State Bank of India", "Axis Bank", "Kotak Mahindra Bank", "Cash"];
+  const seenBankNames = new Set(bankLedgers.map((b) => (b.name || "").toLowerCase()));
+  for (const stdBank of standardBankDefaults) {
+    if (!seenBankNames.has(stdBank.toLowerCase())) {
+      bankLedgers.push({ name: stdBank, parent: "Bank Accounts" });
+    }
+  }
+
+  if (!state.bankImportTargetLedger) {
+    state.bankImportTargetLedger = localStorage.getItem("tally_bank_target_ledger") || (stmt?.bank_ledger || "Bank Accounts");
+  }
 
   // Metrics
   const totalCount = allTxns.length;
@@ -4671,10 +4734,10 @@ function bankImportScreen() {
         <div class="flex items-center gap-3">
           <span class="text-xs font-bold text-outline">Target Bank Ledger in Tally:</span>
           <select 
-            class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-1.5 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary min-w-[200px]"
-            onchange="state.bankImportTargetLedger = this.value">
-            <option value="Bank Accounts">Select Bank Ledger</option>
+            class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-1.5 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary min-w-[220px]"
+            onchange="handleBankTargetLedgerChange(this.value)">
             ${bankLedgers.map((b) => `<option value="${escapeHtml(b.name)}" ${state.bankImportTargetLedger === b.name ? "selected" : ""}>${escapeHtml(b.name)}</option>`).join("")}
+            <option value="__CREATE_NEW__">+ Create New Bank Ledger...</option>
           </select>
         </div>
 
