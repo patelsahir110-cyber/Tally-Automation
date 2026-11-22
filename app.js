@@ -4099,11 +4099,13 @@ function undoBankImportAction() {
 function toggleSelectAllBankRows(masterCheckbox) {
   const filtered = getFilteredBankTransactions();
   if (masterCheckbox.checked) {
-    state.bankImportSelectedIds = filtered.map((t) => t.id);
+    // Select all filtered rows that are not already sent
+    const selectable = filtered.filter((t) => t.send_status !== "sent");
+    state.bankImportSelectedIds = selectable.map((t) => t.id);
   } else {
     state.bankImportSelectedIds = [];
   }
-  renderBankImportTableContainer();
+  render();
 }
 
 function toggleBankRowSelect(id) {
@@ -4576,7 +4578,8 @@ function renderBankTransactionsTable() {
   const isOnline = Boolean(state.tally?.online);
   const allLedgers = (state.masters?.masters || []).filter((m) => m.type === "ledger" || m.type === "gst_ledger");
 
-  const isAllPageSelected = pageItems.length > 0 && pageItems.every((item) => state.bankImportSelectedIds.includes(item.id));
+  const selectablePageItems = pageItems.filter((item) => item.send_status !== "sent");
+  const isAllPageSelected = selectablePageItems.length > 0 && selectablePageItems.every((item) => state.bankImportSelectedIds.includes(item.id));
 
   let rowsHtml = "";
   if (pageItems.length === 0) {
@@ -5131,21 +5134,22 @@ function bankImportScreen() {
       <div class="text-xs text-outline">
         ${
           state.bankImportSelectedIds.length > 0
-            ? `<span class="text-primary font-bold">${state.bankImportSelectedIds.length} transaction(s) selected</span>. Only selected transactions will be dispatched.`
-            : `<span>Ready vouchers will be converted to standard Tally XML and dispatched sequentially via the desktop connector.</span>`
+            ? `<span class="text-primary font-bold">${state.bankImportSelectedIds.length} transaction(s) selected</span> ready for dispatch to TallyPrime.`
+            : `<span>Select transactions using individual checkboxes or click the top header checkbox to select all filtered transactions.</span>`
         }
       </div>
 
       <div class="flex items-center gap-3">
+        <button 
+          class="px-4 py-2.5 rounded-xl border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container transition-all ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
+          onclick="sendBankVouchersToTally('test_one')"
+          ${state.bankImportSendBusy ? "disabled" : ""}>
+          Send 1 for Testing
+        </button>
+
         ${
           state.bankImportSelectedIds.length > 0
             ? `
-          <button 
-            class="px-4 py-2.5 rounded-xl border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container transition-all ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
-            onclick="sendBankVouchersToTally('test_one')"
-            ${state.bankImportSendBusy ? "disabled" : ""}>
-            Test 1 of Selected
-          </button>
           <button 
             class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-black shadow-lg shadow-primary/25 hover:brightness-110 transition-all flex items-center gap-2 ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
             onclick="sendBankVouchersToTally('selected')"
@@ -5161,19 +5165,11 @@ function bankImportScreen() {
         `
             : `
           <button 
-            class="px-4 py-2.5 rounded-xl border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container transition-all ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
-            onclick="sendBankVouchersToTally('test_one')"
-            ${state.bankImportSendBusy ? "disabled" : ""}>
-            Send 1 for Testing
-          </button>
-          <button 
-            class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-bold hover:shadow-lg hover:shadow-primary/20 transition-all flex items-center gap-2 ${state.bankImportSendBusy || readyCount === 0 ? "opacity-50 cursor-not-allowed" : ""}"
-            onclick="sendBankVouchersToTally('all_ready')"
-            ${state.bankImportSendBusy || readyCount === 0 ? "disabled" : ""}>
-            <span class="material-symbols-outlined text-[18px] ${state.bankImportSendBusy ? "animate-spin" : ""}">
-              ${state.bankImportSendBusy ? "progress_activity" : "send"}
-            </span>
-            <span>${state.bankImportSendBusy ? "Dispatching to Tally..." : `Send All Ready (${readyCount})`}</span>
+            class="px-6 py-2.5 rounded-xl bg-surface-container border border-outline-variant/30 text-outline/60 text-xs font-bold cursor-not-allowed flex items-center gap-2"
+            disabled
+            title="Please check one or more rows above to send">
+            <span class="material-symbols-outlined text-[18px]">send</span>
+            <span>Send Selected (0)</span>
           </button>
         `
         }
