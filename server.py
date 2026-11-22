@@ -3772,6 +3772,7 @@ class DestockHandler(SimpleHTTPRequestHandler):
             lock = 1 if data.get("lock", True) else 0
             create_rule = bool(data.get("createRule", False))
             rule_pattern = (data.get("rulePattern") or "").strip()
+            auto_match_all = bool(data.get("autoMatchAll", False))
 
             with db() as conn:
                 comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
@@ -3781,6 +3782,13 @@ class DestockHandler(SimpleHTTPRequestHandler):
                         "INSERT OR REPLACE INTO ledger_rules(id, company, pattern, target_ledger, target_group, created_at) VALUES(?, ?, ?, ?, 'Sundry Debtors', ?)",
                         (str(uuid.uuid4()), company, rule_pattern, ledger, now_iso())
                     )
+
+                if auto_match_all and rule_pattern and stmt_id:
+                    pattern_like = f"%{rule_pattern.lower()}%"
+                    if v_type:
+                        conn.execute("UPDATE bank_transactions SET assigned_ledger=?, voucher_type=?, is_locked=?, updated_at=? WHERE statement_id=? AND LOWER(narration) LIKE ?", (ledger, v_type, lock, now_iso(), stmt_id, pattern_like))
+                    else:
+                        conn.execute("UPDATE bank_transactions SET assigned_ledger=?, is_locked=?, updated_at=? WHERE statement_id=? AND LOWER(narration) LIKE ?", (ledger, lock, now_iso(), stmt_id, pattern_like))
 
                 for tid in txn_ids:
                     if v_type:

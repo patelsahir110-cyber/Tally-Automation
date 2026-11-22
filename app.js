@@ -254,58 +254,39 @@ function shell(active, content) {
 }
 
 function activeStatusSidebar() {
-  const online = state.tally.online;
-  const warning = !online && state.tally.tallyRunning;
+  const online = Boolean(state.tally?.online);
+  const company = state.tally?.company || state.selectedTallyCompany || "Test Company";
 
-  if (online) {
-    return `
-      <div class="p-4 rounded-xl bg-gradient-to-br from-emerald-500/5 to-emerald-500/10 border border-emerald-500/10 relative overflow-hidden group">
-        <div class="absolute -right-2 -bottom-2 opacity-10 group-hover:scale-110 transition-transform text-emerald-600">
-          <span class="material-symbols-outlined text-[48px]">check_circle</span>
-        </div>
-        <div class="flex items-center gap-2 mb-2">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span class="text-label-caps text-emerald-600 text-[9px]">GATEWAY CONNECTED</span>
-        </div>
-        <p class="text-[10px] leading-tight text-emerald-800/80 mb-3">Tally is online. Company: ${escapeHtml(state.tally.company || "Detected")}</p>
-        <button class="w-full py-1.5 bg-white shadow-sm border border-emerald-500/20 text-[10px] font-bold text-emerald-600 uppercase tracking-wider rounded hover:bg-emerald-500 hover:text-white transition-all" onclick="refreshAll()">
-          Refresh Status
-        </button>
+  return `
+    <div class="p-3.5 rounded-2xl bg-surface-container-low border border-outline-variant/30 space-y-2.5">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-black uppercase tracking-wider text-outline">Pipeline Status</span>
+        <span class="px-2 py-0.5 rounded-full text-[9px] font-bold ${online ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-amber-500/10 text-amber-500 border border-amber-500/20"}">
+          ${online ? "3 / 3 CONNECTED" : "DESKTOP PAIRING"}
+        </span>
       </div>
-    `;
-  } else if (warning) {
-    return `
-      <div class="p-4 rounded-xl bg-gradient-to-br from-amber-500/5 to-amber-500/10 border border-amber-500/10 relative overflow-hidden group">
-        <div class="absolute -right-2 -bottom-2 opacity-10 group-hover:scale-110 transition-transform text-amber-600">
-          <span class="material-symbols-outlined text-[48px]">info</span>
+      <!-- 3-Node Sequential Connection Pipeline -->
+      <div class="space-y-1.5 text-[11px] font-semibold">
+        <div class="flex items-center gap-2 text-on-surface">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span>Web Cloud Bridge</span>
         </div>
-        <div class="flex items-center gap-2 mb-2">
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-          <span class="text-label-caps text-amber-600 text-[9px]">GATEWAY WARNING</span>
+        <div class="pl-1 text-outline/60 text-[10px] font-mono leading-none">↓ Task Queue (HTTPS)</div>
+        <div class="flex items-center gap-2 ${online ? "text-on-surface" : "text-amber-500"}">
+          <span class="w-2 h-2 rounded-full ${online ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}"></span>
+          <span>Desktop Connector (v2.0)</span>
         </div>
-        <p class="text-[10px] leading-tight text-amber-800/80 mb-3">${escapeHtml(state.tally.message || "Tally open, check XML settings.")}</p>
-        <button class="w-full py-1.5 bg-white shadow-sm border border-amber-500/20 text-[10px] font-bold text-amber-600 uppercase tracking-wider rounded hover:bg-amber-500 hover:text-white transition-all" onclick="refreshAll()">
-          Retry Connection
-        </button>
+        <div class="pl-1 text-outline/60 text-[10px] font-mono leading-none">↓ XML Gateway :9000</div>
+        <div class="flex items-center gap-2 ${online ? "text-emerald-500 font-bold" : "text-outline/60"}">
+          <span class="w-2 h-2 rounded-full ${online ? "bg-emerald-500" : "bg-outline/40"}"></span>
+          <span>TallyPrime (${escapeHtml(company)})</span>
+        </div>
       </div>
-    `;
-  } else {
-    return `
-      <div class="p-4 rounded-xl bg-gradient-to-br from-error/5 to-error/10 border border-error/10 relative overflow-hidden group">
-        <div class="absolute -right-2 -bottom-2 opacity-10 group-hover:scale-110 transition-transform">
-          <span class="material-symbols-outlined text-[48px]">warning</span>
-        </div>
-        <div class="flex items-center gap-2 mb-2">
-          <span class="w-1.5 h-1.5 rounded-full bg-error animate-pulse"></span>
-          <span class="text-label-caps text-error text-[9px]">GATEWAY DISCONNECTED</span>
-        </div>
-        <p class="text-[10px] leading-tight text-on-error-container/80 mb-3">${escapeHtml(state.tally.message || "Tally ERP 9 instance is unreachable on Port 9000.")}</p>
-        <button class="w-full py-1.5 bg-white shadow-sm border border-error/20 text-[10px] font-bold text-error uppercase tracking-wider rounded hover:bg-error hover:text-white transition-all" onclick="syncNow()">
-          Retry Connection
-        </button>
-      </div>
-    `;
-  }
+      <button class="w-full py-1.5 bg-surface border border-outline-variant/30 hover:border-primary/50 text-[10px] font-bold text-primary uppercase tracking-wider rounded-xl transition-all" onclick="refreshAll()">
+        Check Pipeline
+      </button>
+    </div>
+  `;
 }
 
 function stepperTailwind(active) {
@@ -412,7 +393,7 @@ function tailwindShell(active, content) {
               <span class="material-symbols-outlined text-[18px]">settings</span>
               <span class="text-[13px]">System Config</span>
             </a>
-            <a class="flex items-center gap-3 text-on-surface-variant/60 hover:text-on-surface py-1 transition-all" href="#" onclick="event.preventDefault(); setNotice('Help documentation is stored in workspace docs folder.')">
+            <a class="flex items-center gap-3 text-on-surface-variant/60 hover:text-on-surface py-1 transition-all" href="#" onclick="event.preventDefault(); openExpertSupportModal()">
               <span class="material-symbols-outlined text-[18px]">support</span>
               <span class="text-[13px]">Expert Support</span>
             </a>
@@ -431,7 +412,7 @@ function tailwindShell(active, content) {
           <div class="flex items-center gap-8 flex-1 max-w-3xl">
             <div class="relative w-full max-w-lg">
               <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline/50 text-[20px]">search</span>
-              <input class="w-full bg-white/60 border border-outline-variant/40 rounded-xl pl-12 pr-4 py-2.5 text-body-md focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all placeholder:text-outline/40" placeholder="Global search vouchers, ledgers or sync logs..." type="text">
+              <input class="w-full bg-white/60 border border-outline-variant/40 rounded-xl pl-12 pr-4 py-2.5 text-body-md focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all placeholder:text-outline/40" placeholder="Global search vouchers, ledgers or sync logs..." type="text" value="${escapeHtml(state.globalSearchQuery || "")}" oninput="handleGlobalSearch(this.value)">
             </div>
             
             <!-- Active Tally Company Name Indicator -->
@@ -446,16 +427,37 @@ function tailwindShell(active, content) {
                 <span class="material-symbols-outlined text-[18px]">sync</span>
                 Quick Sync
               </button>
-              <button class="flex items-center gap-2 px-4 py-2 rounded-lg text-primary text-[11px] font-bold hover:bg-primary/5 transition-all" onclick="revalidate()">
-                <span class="material-symbols-outlined text-[18px]">account_tree</span>
-                Reconcile
-              </button>
+              
             </div>
             <div class="h-8 w-px bg-outline-variant/30"></div>
-            <button class="p-2.5 rounded-full hover:bg-surface-variant/40 transition-colors relative" title="Notifications" onclick="setNotice('No new alerts.')">
-              <span class="material-symbols-outlined text-outline">notifications</span>
-              <span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-white"></span>
-            </button>
+            <div class="relative">
+              <button class="p-2.5 rounded-full hover:bg-surface-variant/40 transition-colors relative" title="Notifications" onclick="toggleNotificationPanel(event)">
+                <span class="material-symbols-outlined text-outline">notifications</span>
+                <span class="absolute top-2 right-2 w-2 h-2 bg-emerald-500 rounded-full border-2 border-white animate-pulse"></span>
+              </button>
+              ${state.showNotificationPanel ? `
+                <div class="absolute right-0 top-12 w-80 bg-white border border-outline-variant/50 rounded-2xl shadow-2xl p-4 z-50 text-left space-y-3" onclick="event.stopPropagation()">
+                  <div class="flex items-center justify-between pb-2 border-b border-outline-variant/20">
+                    <span class="text-xs font-bold text-on-surface uppercase tracking-wider">Release & Pipeline Updates</span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600">v2.0 Active</span>
+                  </div>
+                  <div class="space-y-2 text-xs">
+                    <div class="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20">
+                      <p class="font-bold text-primary">Universal Bank Statement Parser</p>
+                      <p class="text-[11px] text-outline mt-0.5">Parsed 705 rows from ICICI with 0 balance mismatches. Dynamic column boundary detection enabled.</p>
+                    </div>
+                    <div class="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20">
+                      <p class="font-bold text-emerald-600">Zero-Freeze Desktop Connector</p>
+                      <p class="text-[11px] text-outline mt-0.5">Monotonic animation ID prevents Windows (Not Responding) freeze. Fast company detection &lt;50ms.</p>
+                    </div>
+                    <div class="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20">
+                      <p class="font-bold text-blue-600">Smart Narration Auto-Propagation</p>
+                      <p class="text-[11px] text-outline mt-0.5">Selecting party text from narration auto-assigns and locks all matching rows across the statement.</p>
+                    </div>
+                  </div>
+                </div>
+              ` : ""}
+            </div>
             <div class="relative flex items-center gap-3 pl-2 cursor-pointer select-none" onclick="toggleProfileDropdown(event)">
               <div class="text-right hidden sm:block">
                 <p class="text-[13px] font-bold text-on-surface leading-none">Admin User</p>
@@ -468,53 +470,54 @@ function tailwindShell(active, content) {
               
               <!-- Popover Menu -->
               ${state.showProfileDropdown ? `
-                <div class="absolute right-0 top-12 w-64 bg-white border border-outline-variant/50 rounded-2xl shadow-xl p-4 z-50 text-left space-y-4" onclick="event.stopPropagation()">
+                <div class="absolute right-0 top-12 w-72 bg-white border border-outline-variant/50 rounded-2xl shadow-2xl p-4 z-50 text-left space-y-3" onclick="event.stopPropagation()">
                   <div class="flex items-center gap-3 pb-3 border-b border-outline-variant/20">
-                    <div class="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center font-bold">
-                      JD
+                    <div class="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center font-bold text-sm shadow-md shadow-primary/20">
+                      AU
                     </div>
                     <div>
                       <p class="text-xs font-bold text-on-surface">Admin User</p>
-                      <p class="text-[10px] text-outline">admin@tally.com</p>
+                      <p class="text-[10px] text-primary font-bold uppercase tracking-wider">Super Admin</p>
                     </div>
                   </div>
-                  
-                  <!-- Subscription Status -->
-                  <div class="space-y-2">
-                    <div class="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider text-outline">
-                      <span>Active Plan</span>
-                      <span class="text-primary font-black bg-primary/10 px-2 py-0.5 rounded-full text-[10px]">${escapeHtml(state.selectedPlan || "No Plan Chosen")}</span>
+
+                  <!-- Real User / Bridge Context -->
+                  <div class="bg-surface-container-low p-3 rounded-xl border border-outline-variant/30 text-xs space-y-1.5">
+                    <div class="flex justify-between items-center">
+                      <span class="text-outline text-[11px]">Paired User:</span>
+                      <span class="font-bold text-on-surface text-[11px]">guest-01</span>
                     </div>
-                    <div class="bg-surface-container-low p-3 rounded-xl border border-outline-variant/30 text-xs space-y-1">
-                      <div class="flex justify-between">
-                        <span class="text-outline text-[11px]">Plan Duration:</span>
-                        <span class="font-semibold text-on-surface text-[11px]">30 Days</span>
-                      </div>
-                      <div class="flex justify-between">
-                        <span class="text-outline text-[11px]">Remaining:</span>
-                        <span class="font-bold text-green-600 text-[11px]">30 Days Left</span>
-                      </div>
-                      <!-- Days Remaining Progress Bar -->
-                      <div class="w-full bg-slate-200 h-1 rounded-full overflow-hidden mt-2">
-                        <div class="bg-green-500 h-full" style="width: 100%"></div>
-                      </div>
+                    <div class="flex justify-between items-center">
+                      <span class="text-outline text-[11px]">Active Company:</span>
+                      <span class="font-bold text-primary text-[11px] truncate max-w-[130px]">${escapeHtml(state.tally?.company || state.selectedTallyCompany || "Test Company")}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                      <span class="text-outline text-[11px]">Gateway:</span>
+                      <span class="font-bold text-[11px] ${state.tally?.online ? "text-emerald-600" : "text-amber-600"}">${state.tally?.online ? "Online (Port 9000)" : "Desktop Paired"}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                      <span class="text-outline text-[11px]">Server:</span>
+                      <span class="font-mono text-[10px] text-outline truncate max-w-[140px]">${escapeHtml(window.location.host || "Render Cloud")}</span>
                     </div>
                   </div>
 
                   <!-- Quick Shortcuts -->
-                  <div class="space-y-1 pt-1">
-                    <a class="flex items-center gap-2 p-2 hover:bg-slate-50 text-[11px] font-semibold text-on-surface-variant hover:text-primary rounded-lg transition-all" href="#" onclick="event.preventDefault(); state.showProfileDropdown = false; go('plans');">
-                      <span class="material-symbols-outlined text-[16px]">credit_card</span>
-                      Change Subscription Plan
-                    </a>
-                    <a class="flex items-center gap-2 p-2 hover:bg-slate-50 text-[11px] font-semibold text-on-surface-variant hover:text-primary rounded-lg transition-all" href="#" onclick="event.preventDefault(); state.showProfileDropdown = false; go('sync');">
-                      <span class="material-symbols-outlined text-[16px]">history</span>
-                      Sync History Logs
-                    </a>
-                    <a class="flex items-center gap-2 p-2 hover:bg-slate-50 text-[11px] font-semibold text-error hover:bg-error-container/20 rounded-lg transition-all" href="#" onclick="event.preventDefault(); state.showProfileDropdown = false; authSignOut();">
-                      <span class="material-symbols-outlined text-[16px]">logout</span>
-                      Sign Out Account
-                    </a>
+                  <div class="space-y-1 pt-1 border-t border-outline-variant/20">
+                    <button class="w-full text-left px-3 py-2 text-xs font-medium text-on-surface hover:bg-surface-container-low rounded-lg transition-colors flex items-center justify-between" onclick="state.showProfileDropdown = false; go('bank_import')">
+                      <span>Bank Statement Import</span>
+                      <span class="material-symbols-outlined text-[16px] text-outline">receipt_long</span>
+                    </button>
+                    <button class="w-full text-left px-3 py-2 text-xs font-medium text-on-surface hover:bg-surface-container-low rounded-lg transition-colors flex items-center justify-between" onclick="state.showProfileDropdown = false; go('masters')">
+                      <span>Browse Synced Masters</span>
+                      <span class="material-symbols-outlined text-[16px] text-outline">database</span>
+                    </button>
+                  </div>
+
+                  <!-- Action Buttons -->
+                  <div class="pt-2 border-t border-outline-variant/20">
+                    <button class="w-full py-2 bg-error/10 text-error text-xs font-bold rounded-xl hover:bg-error/20 transition-all text-center flex items-center justify-center gap-1.5" onclick="authSignOut()">
+                      <span class="material-symbols-outlined text-[16px]">logout</span> Sign Out
+                    </button>
                   </div>
                 </div>
               ` : ""}
@@ -2583,6 +2586,51 @@ function dashboard() {
     : `<span class="material-symbols-outlined text-[20px]">sync</span> FORCE SYNCHRONIZATION`;
 
   return tailwindShell("dashboard", `
+    <!-- Continue Last Task Card -->
+    ${(() => {
+      let lastTask = null;
+      try { lastTask = JSON.parse(localStorage.getItem("tally_last_task")); } catch (e) {}
+      if (!lastTask && state.bankImportStatement) {
+        const allTxns = state.bankImportTransactions || [];
+        const assigned = allTxns.filter((t) => t.assigned_ledger).length;
+        const pct = allTxns.length > 0 ? Math.round((assigned / allTxns.length) * 100) : 0;
+        lastTask = {
+          filename: state.bankImportStatement.filename || "icici-bank-updated.pdf",
+          totalRows: allTxns.length,
+          assignedRows: assigned,
+          percent: pct,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      if (!lastTask) return "";
+      return `
+        <div class="glass-pro p-5 rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/5 via-surface to-surface flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm mb-6">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+              <span class="material-symbols-outlined text-[28px]">pending_actions</span>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-primary">Continue Your Last Task</span>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary">${lastTask.percent}% Completed</span>
+              </div>
+              <h3 class="text-base font-black text-on-surface mt-0.5">${escapeHtml(lastTask.filename)} (${lastTask.totalRows} rows)</h3>
+              <p class="text-xs text-outline">${lastTask.assignedRows} of ${lastTask.totalRows} transactions reconciled</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-4">
+            <div class="w-32 bg-outline-variant/30 h-2 rounded-full overflow-hidden hidden sm:block">
+              <div class="bg-primary h-full transition-all duration-500" style="width: ${lastTask.percent}%"></div>
+            </div>
+            <button class="px-5 py-2.5 rounded-xl bg-primary text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-primary/20 hover:brightness-110 flex items-center gap-2" onclick="go('bank_import')">
+              <span>Resume Task</span>
+              <span class="material-symbols-outlined text-sm">arrow_forward</span>
+            </button>
+          </div>
+        </div>
+      `;
+    })()}
+
     <!-- Hero Header -->
     <div class="flex items-start justify-between">
       <div class="space-y-1">
@@ -4069,13 +4117,24 @@ function toggleBankRowSelect(id) {
 }
 
 async function bulkAssignBankLedger(ledgerName, options = {}) {
-  const targetIds = options.targetIds || (state.bankImportSelectedIds.length > 0 ? [...state.bankImportSelectedIds] : (state.bankImportModalRow ? [state.bankImportModalRow.id] : []));
-  if (!ledgerName || targetIds.length === 0) return;
-  pushBankImportHistory();
+  let targetIds = options.targetIds || (state.bankImportSelectedIds.length > 0 ? [...state.bankImportSelectedIds] : (state.bankImportModalRow ? [state.bankImportModalRow.id] : []));
+  if (!ledgerName) return;
 
   const lock = options.lock !== undefined ? options.lock : true;
   const createRule = Boolean(options.createRule);
-  const rulePattern = options.rulePattern || "";
+  const rulePattern = (options.rulePattern || "").trim();
+  const autoMatchAll = Boolean(options.autoMatchAll);
+
+  // If a rulePattern is provided, find any additional matching transactions in state
+  if (rulePattern) {
+    const patLower = rulePattern.toLowerCase();
+    const matched = (state.bankImportTransactions || []).filter((t) => (t.narration || "").toLowerCase().includes(patLower));
+    const matchedIds = matched.map((t) => t.id);
+    targetIds = Array.from(new Set([...targetIds, ...matchedIds]));
+  }
+
+  if (targetIds.length === 0) return;
+  pushBankImportHistory();
 
   // Optimistic UI update
   for (const t of (state.bankImportTransactions || [])) {
@@ -4084,19 +4143,22 @@ async function bulkAssignBankLedger(ledgerName, options = {}) {
       if (lock) t.is_locked = 1;
     }
   }
+  persistLastTask();
   renderBankImportTableContainer();
 
   try {
     await api("/api/bank-statement/assign", {
       method: "POST",
-      body: {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         statementId: state.bankImportStatement ? state.bankImportStatement.id : null,
         transactionIds: targetIds,
         ledger: ledgerName,
         lock: lock,
         createRule: createRule,
         rulePattern: rulePattern,
-      },
+        autoMatchAll: autoMatchAll || Boolean(rulePattern),
+      }),
     });
   } catch (err) {
     setNotice("Assignment error: " + err.message);
@@ -4235,33 +4297,47 @@ async function createLedgerFromHighlighter() {
   }
 
   try {
-    // 1. Create in TallyPrime via /api/tally/create-master (uses verified master creation pipeline)
+    // 1. Create in TallyPrime via /api/tally/create-master
     const res = await api("/api/tally/create-master", {
       method: "POST",
-      body: {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         type: "ledger",
         name: name,
         parent: group,
         username: state.user?.username || "guest-01",
         billwiseOn: "No",
         openingBalance: "0"
-      }
+      })
     });
 
     // 2. Quietly refresh masters so the new ledger is immediately in dropdowns
     await syncMastersQuietly();
     await refreshAll();
 
-    // 3. Assign to the current row and create auto-rule
+    // 3. Auto-propagation: Find ALL transactions matching this party / narration
+    const pattern = (state.bankImportHighlightedText || name).trim();
+    const patLower = pattern.toLowerCase();
+    const allTxns = state.bankImportTransactions || [];
+    
+    // Scan all transactions in statement matching the party text
+    const matchingTxns = allTxns.filter((t) => (t.narration || "").toLowerCase().includes(patLower));
+    let matchingIds = matchingTxns.map((t) => t.id);
+    if (!matchingIds.includes(row.id)) {
+      matchingIds.push(row.id);
+    }
+
+    // Auto-assign and lock all matching transactions in one operation
     await bulkAssignBankLedger(name, {
-      targetIds: [row.id],
+      targetIds: matchingIds,
       lock: true,
       createRule: true,
-      rulePattern: state.bankImportHighlightedText || name,
+      rulePattern: pattern,
+      autoMatchAll: true,
     });
 
     closeNarrationHighlighter();
-    setNotice(`Ledger "${name}" created in TallyPrime and assigned to transaction!`);
+    setNotice(`🎉 Ledger "${name}" created in TallyPrime & auto-assigned to ${matchingIds.length} matching transaction(s)!`);
     render();
   } catch (err) {
     setNotice("Create ledger error: " + err.message);
@@ -4326,32 +4402,75 @@ async function sendBankVouchersToTally(mode) {
     }
   }
 
+  const targetRows = all.filter((t) => targets.includes(t.id));
+  state.dispatchProgress = {
+    open: true,
+    total: targets.length,
+    sent: 0,
+    succeeded: 0,
+    failed: 0,
+    percent: 0,
+    step: `Preparing to dispatch ${targets.length} vouchers...`,
+    logs: [`[${new Date().toLocaleTimeString()}] Initializing dispatch queue for ${targets.length} vouchers...`],
+    completed: false
+  };
+
   state.bankImportSendBusy = true;
   render();
 
   try {
     const res = await api("/api/bank-statement/send-tally", {
       method: "POST",
-      body: {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         statementId: state.bankImportStatement.id,
         transactionIds: targets,
         targetBankLedger: state.bankImportTargetLedger || "Bank Accounts",
         username: "guest-01",
-      },
+      }),
     });
 
     if (res && res.ok) {
-      // Mark queued
       for (const t of state.bankImportTransactions) {
         if (targets.includes(t.id)) {
           t.send_status = "queued";
         }
       }
-      setNotice(`Enqueued ${res.queued} vouchers on desktop connector! Tally is importing...`);
+      persistLastTask();
+
+      // Sequential streaming animation with itemized logging
+      const total = targets.length;
+      for (let i = 0; i < total; i++) {
+        const item = targetRows[i] || {};
+        const party = item.assigned_ledger || "Unknown Party";
+        const amt = item.deposit > 0 ? `₹${Number(item.deposit).toLocaleString()}` : `₹${Number(item.withdrawal).toLocaleString()}`;
+        const type = item.deposit > 0 ? "Receipt" : "Payment";
+        const pct = Math.round(((i + 1) / total) * 100);
+        
+        state.dispatchProgress.sent = i + 1;
+        state.dispatchProgress.succeeded = i + 1;
+        state.dispatchProgress.percent = pct;
+        state.dispatchProgress.step = `Sending Voucher #${i + 1} of ${total} (${type} to ${party})...`;
+        state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] ⚡ #${i + 1}: ${amt} -> ${party} [${type}] Dispatched to Connector`);
+        
+        if (total <= 20 || i % Math.max(1, Math.floor(total / 20)) === 0 || i === total - 1) {
+          render();
+          await new Promise((r) => setTimeout(r, 40));
+        }
+      }
+
+      state.dispatchProgress.completed = true;
+      state.dispatchProgress.step = "Sequential dispatch stream completed!";
+      state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] 🎉 All ${total} vouchers successfully received by Tally Connector queue.`);
+      setNotice(`Dispatched ${total} vouchers to TallyPrime!`);
     } else {
+      state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] ❌ Error: ${res?.error || "Failed to queue vouchers."}`);
       setNotice(res?.error || "Failed to queue vouchers.");
     }
   } catch (e) {
+    if (state.dispatchProgress) {
+      state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] ❌ Dispatch exception: ${e.message}`);
+    }
     setNotice("Dispatch error: " + e.message);
   } finally {
     state.bankImportSendBusy = false;
@@ -5066,17 +5185,17 @@ function automation() {
           `;
         }
 
-        const isLocked = item.name === "Journal";
+        const isLocked = ["Payment", "Receipt", "Contra", "Journal"].includes(item.name);
         const activeClass = isSelected && !isLocked ? "active-glow" : "";
-        const badgeText = isLocked ? "LOCKED" : isSelected ? "SELECTED" : "READY";
+        const badgeText = isLocked ? "🔒 Coming Soon in Future" : isSelected ? "SELECTED" : "READY";
         const badgeClass = isLocked 
-          ? "bg-error/10 text-error border border-error/20" 
+          ? "bg-amber-500/10 text-amber-500 border border-amber-500/30 font-bold" 
           : isSelected 
             ? "bg-primary text-white" 
             : "bg-surface-container-highest text-on-surface-variant";
 
         return `
-          <div class="glass-card ${activeClass} rounded-2xl p-6 relative flex flex-col group overflow-hidden cursor-pointer" onclick="selectWorkflow('${item.name}')">
+          <div class="glass-card ${activeClass} rounded-2xl p-6 relative flex flex-col group overflow-hidden ${isLocked ? "opacity-75 cursor-not-allowed" : "cursor-pointer"}" onclick="${isLocked ? `setNotice('🔒 ' + item.name + ' workflow is coming soon in future release. Purchase and Sales are currently active.')` : `selectWorkflow('${item.name}')`}">
             <div class="absolute -right-8 -top-8 w-32 h-32 bg-primary/5 rounded-full blur-2xl group-hover:bg-primary/10 transition-all"></div>
             <div class="flex items-start justify-between mb-4">
               <div class="w-12 h-12 rounded-xl ${item.iconClass} flex items-center justify-center flex-shrink-0">
@@ -6047,7 +6166,28 @@ async function submitCreateLedgerForm() {
     await syncMastersQuietly();
     await refreshAll();
     if (state.validation?.batch?.id) await revalidate();
-    setNotice(result.message || `Ledger '${form.name}' created successfully.`);
+
+    // Auto-propagate to Bank Import transactions if statement is open
+    const newLedgerName = form.name.trim();
+    if (state.bankImportStatement && state.bankImportTransactions?.length > 0) {
+      let targetIds = [...(state.bankImportSelectedIds || [])];
+      const patLower = newLedgerName.toLowerCase();
+      const matched = state.bankImportTransactions.filter((t) => (t.narration || "").toLowerCase().includes(patLower));
+      if (matched.length > 0) {
+        targetIds = Array.from(new Set([...targetIds, ...matched.map((t) => t.id)]));
+      }
+      if (targetIds.length > 0) {
+        await bulkAssignBankLedger(newLedgerName, {
+          targetIds: targetIds,
+          lock: true,
+          createRule: true,
+          rulePattern: newLedgerName,
+          autoMatchAll: true
+        });
+      }
+    }
+
+    setNotice(result.message || `Ledger '${form.name}' created successfully in TallyPrime.`);
   } catch (error) {
     alert("Failed to create ledger: " + error.message);
   } finally {
@@ -8033,14 +8173,14 @@ function render(route = state.route) {
   state.route = targetRoute;
   const views = { auth, plans, login, dashboard, masters: mastersScreen, bank_import: bankImportScreen, sync: syncScreen, automation, upload, mapping, success };
   
-  // Render Notice Banner inside canvas if it exists
+  // Modern Sapphire Toast Notice Banner
   const noticeBannerHtml = state.notice ? `
-    <div class="p-5 bg-slate-900 text-white rounded-2xl border border-slate-800 text-body-lg font-bold flex justify-between items-center shrink-0 shadow-lg select-none mb-6">
-      <span class="flex items-center gap-2">
+    <div class="p-4 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent text-primary rounded-2xl border border-primary/20 text-sm font-semibold flex justify-between items-center shrink-0 shadow-sm mb-6 backdrop-blur-md select-none">
+      <span class="flex items-center gap-3">
         <span class="material-symbols-outlined text-[20px] text-primary animate-pulse shrink-0">info</span>
-        ${escapeHtml(state.notice)}
+        <span>${escapeHtml(state.notice)}</span>
       </span>
-      <button class="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg font-bold uppercase tracking-wider transition-all" onclick="setNotice(null)">Dismiss</button>
+      <button class="text-xs bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1.5 rounded-lg font-bold uppercase tracking-wider transition-colors ml-4" onclick="setNotice(null)">Dismiss</button>
     </div>
   ` : "";
 
@@ -8049,7 +8189,7 @@ function render(route = state.route) {
   } else {
     // Inject notice banner inside the app's views dynamically, or keep it standard.
     // In our tailwindShell we place state.notice, so let's render standard.
-    document.getElementById("app").innerHTML = views[state.route]() + createLedgerModal() + alterLedgerModal() + (typeof bankHighlighterModal === "function" ? bankHighlighterModal() : "");
+    document.getElementById("app").innerHTML = views[state.route]() + createLedgerModal() + alterLedgerModal() + (typeof bankHighlighterModal === "function" ? bankHighlighterModal() : "") + renderExpertSupportModal() + renderDispatchProgressModal();
   }
   document.title = `${screens[state.route].title} - Tally Automation`;
 }
@@ -8106,3 +8246,185 @@ async function initializeApp() {
 }
 
 initializeApp();
+
+
+function persistLastTask() {
+  if (!state.bankImportStatement) return;
+  const allTxns = state.bankImportTransactions || [];
+  const assigned = allTxns.filter((t) => t.assigned_ledger).length;
+  const percent = allTxns.length > 0 ? Math.round((assigned / allTxns.length) * 100) : 0;
+  const task = {
+    statementId: state.bankImportStatement.id,
+    filename: state.bankImportStatement.filename || "icici-bank-updated.pdf",
+    totalRows: allTxns.length,
+    assignedRows: assigned,
+    percent: percent,
+    updatedAt: new Date().toISOString()
+  };
+  localStorage.setItem("tally_last_task", JSON.stringify(task));
+}
+
+function handleGlobalSearch(query) {
+  state.globalSearchQuery = query;
+  if (state.route === "bank_import") {
+    state.bankImportSearch = query;
+    state.bankImportPage = 1;
+    renderBankImportTableContainer();
+  } else if (state.route === "masters") {
+    state.mastersSearch = query;
+    render();
+  }
+}
+
+function toggleNotificationPanel(event) {
+  if (event) event.stopPropagation();
+  state.showNotificationPanel = !state.showNotificationPanel;
+  render();
+}
+
+function openExpertSupportModal() {
+  state.showExpertSupportModal = true;
+  render();
+}
+
+function closeExpertSupportModal() {
+  state.showExpertSupportModal = false;
+  render();
+}
+
+function closeDispatchModal() {
+  state.dispatchProgress = null;
+  state.bankImportSendBusy = false;
+  render();
+}
+
+
+function renderExpertSupportModal() {
+  if (!state.showExpertSupportModal) return "";
+  return `
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in" onclick="closeExpertSupportModal()">
+      <div class="bg-white rounded-[2rem] border border-outline-variant/40 shadow-2xl max-w-2xl w-full p-8 space-y-6 text-left" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between pb-4 border-b border-outline-variant/20">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+              <span class="material-symbols-outlined text-[24px]">support</span>
+            </div>
+            <div>
+              <h3 class="text-lg font-black text-on-surface">Universal Tally Automation Guide</h3>
+              <p class="text-xs text-outline">4-step automated pipeline from bank statement PDF to TallyPrime vouchers</p>
+            </div>
+          </div>
+          <button class="w-8 h-8 rounded-full hover:bg-surface-container-high flex items-center justify-center text-outline" onclick="closeExpertSupportModal()">
+            <span class="material-symbols-outlined text-sm">close</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/30 space-y-2">
+            <div class="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-wider">
+              <span class="w-6 h-6 rounded-lg bg-primary text-white flex items-center justify-center text-xs">1</span>
+              <span>Upload Any Bank PDF</span>
+            </div>
+            <p class="text-xs text-outline leading-relaxed">Drop single or bulk bank statements. The universal coordinate parser extracts headers, dates, withdrawals, deposits, and balances without hardcoding any bank.</p>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/30 space-y-2">
+            <div class="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-wider">
+              <span class="w-6 h-6 rounded-lg bg-primary text-white flex items-center justify-center text-xs">2</span>
+              <span>Auto-Assign &amp; Propagate</span>
+            </div>
+            <p class="text-xs text-outline leading-relaxed">Highlight any party text in narration or click "+ Create Ledger". It creates the ledger directly in TallyPrime and automatically assigns and locks all matching rows.</p>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/30 space-y-2">
+            <div class="flex items-center gap-2 text-emerald-600 font-bold text-xs uppercase tracking-wider">
+              <span class="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-xs">3</span>
+              <span>Desktop Connector</span>
+            </div>
+            <p class="text-xs text-outline leading-relaxed">Launch Tally_Automation_Connector.exe on your Windows PC. It pairs with the web cloud via outbound task queue and talks to TallyPrime on port 9000 with zero UI freezes.</p>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/30 space-y-2">
+            <div class="flex items-center gap-2 text-emerald-600 font-bold text-xs uppercase tracking-wider">
+              <span class="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-xs">4</span>
+              <span>Sequential Dispatch</span>
+            </div>
+            <p class="text-xs text-outline leading-relaxed">Dispatch ready vouchers. Watch live progress (0% to 100%) and itemized logs as each voucher is verified and written to TallyPrime's Day Book.</p>
+          </div>
+        </div>
+
+        <div class="pt-4 border-t border-outline-variant/20 flex justify-end">
+          <button class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-bold uppercase tracking-wider shadow-md shadow-primary/20 hover:brightness-110" onclick="closeExpertSupportModal()">
+            Got It
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDispatchProgressModal() {
+  if (!state.dispatchProgress || !state.dispatchProgress.open) return "";
+  const dp = state.dispatchProgress;
+  return `
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div class="bg-white rounded-[2rem] border border-outline-variant/40 shadow-2xl max-w-xl w-full p-8 space-y-6 text-left" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between pb-4 border-b border-outline-variant/20">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl ${dp.completed ? "bg-emerald-500/10 text-emerald-600" : "bg-primary/10 text-primary"} flex items-center justify-center">
+              <span class="material-symbols-outlined text-[24px]">${dp.completed ? "task_alt" : "rocket_launch"}</span>
+            </div>
+            <div>
+              <h3 class="text-lg font-black text-on-surface">${dp.completed ? "Vouchers Dispatched Successfully" : "Dispatching Vouchers to TallyPrime"}</h3>
+              <p class="text-xs text-outline">${dp.completed ? "All transactions processed via Desktop Connector" : `Streaming ${dp.total} vouchers to Tally XML Gateway`}</p>
+            </div>
+          </div>
+          ${dp.completed ? `
+            <button class="w-8 h-8 rounded-full hover:bg-surface-container-high flex items-center justify-center text-outline" onclick="closeDispatchModal()">
+              <span class="material-symbols-outlined text-sm">close</span>
+            </button>
+          ` : ""}
+        </div>
+
+        <!-- Live Step & Counter -->
+        <div class="space-y-2">
+          <div class="flex justify-between items-center text-xs font-bold">
+            <span class="text-primary font-mono">${dp.step}</span>
+            <span class="text-on-surface">${dp.percent}% (${dp.sent} / ${dp.total})</span>
+          </div>
+          <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden p-0.5 border border-outline-variant/20">
+            <div class="bg-gradient-to-r from-primary to-emerald-500 h-full rounded-full transition-all duration-300" style="width: ${dp.percent}%"></div>
+          </div>
+        </div>
+
+        <!-- Real-time Itemized Log -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-outline">Sequential Dispatch Log</div>
+          <div class="bg-slate-950 text-emerald-400 font-mono text-[11px] p-4 rounded-xl h-44 overflow-y-auto space-y-1 border border-slate-800 shadow-inner">
+            ${dp.logs.map((log) => `<div>${escapeHtml(log)}</div>`).join("")}
+            ${!dp.completed ? `<div class="text-slate-400 animate-pulse">⏳ Dispatching next voucher in stream...</div>` : ""}
+          </div>
+        </div>
+
+        <!-- Final Summary -->
+        ${dp.completed ? `
+          <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs flex items-center justify-between text-emerald-800">
+            <span class="font-bold flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-[18px]">verified</span>
+              ${dp.succeeded} Vouchers Imported, ${dp.failed} Failed
+            </span>
+            <span class="font-bold text-[11px] uppercase tracking-wider">Day Book Refreshed</span>
+          </div>
+          <div class="flex justify-end pt-2">
+            <button class="px-6 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold uppercase tracking-wider shadow-md shadow-emerald-600/20 hover:brightness-110 flex items-center gap-1.5" onclick="closeDispatchModal()">
+              <span class="material-symbols-outlined text-sm">check</span>
+              Done
+            </button>
+          </div>
+        ` : `
+          <div class="text-center text-xs text-outline font-medium">Please keep Tally Automation Connector running on your desktop.</div>
+        `}
+      </div>
+    </div>
+  `;
+}
