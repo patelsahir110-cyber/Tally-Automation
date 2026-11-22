@@ -1152,15 +1152,18 @@ def classify_bank_narration(
 
 def generate_bank_voucher_xml(company: str, bank_ledger: str, txn: dict[str, Any]) -> str:
     from xml.sax.saxutils import escape as xml_escape
-    comp_clean = xml_escape(company or "")
-    bank_clean = xml_escape(bank_ledger or "Bank Accounts")
-    party_clean = xml_escape(txn.get("assigned_ledger") or "Suspense")
-    narr_clean = xml_escape(txn.get("narration") or "")
+    from datetime import datetime
+    import re
+
+    comp_clean = xml_escape((company or "").strip())
+    bank_clean = xml_escape((bank_ledger or "Bank Accounts").strip())
+    party_clean = xml_escape((txn.get("assigned_ledger") or "Suspense").strip())
+    narr_clean = xml_escape((txn.get("narration") or "").strip())
     v_type = txn.get("voucher_type") or ("Receipt" if txn.get("deposit", 0) > 0 else "Payment")
     amount = txn.get("deposit") if txn.get("deposit", 0) > 0 else txn.get("withdrawal", 0)
     amount_str = f"{abs(float(amount)):.2f}"
 
-    raw_date = txn.get("date") or ""
+    raw_date = str(txn.get("date") or "").strip()
     date_parts = re.split(r"[-/\.]", raw_date)
     if len(date_parts) == 3:
         if len(date_parts[0]) == 4:
@@ -1170,76 +1173,68 @@ def generate_bank_voucher_xml(company: str, bank_ledger: str, txn: dict[str, Any
     else:
         tally_date = datetime.now().strftime("%Y%m%d")
 
+    comp_tag = f"<STATICVARIABLES><SVCURRENTCOMPANY>{comp_clean}</SVCURRENTCOMPANY></STATICVARIABLES>" if comp_clean else ""
+
     if v_type == "Receipt":
-        return f"""<ENVELOPE>
-  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Import</TALLYREQUEST><TYPE>Data</TYPE><ID>Vouchers</ID></HEADER>
-  <BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>{comp_clean}</SVCURRENTCOMPANY></STATICVARIABLES></DESC>
-  <DATA><TALLYMESSAGE>
-    <VOUCHER VCHTYPE="Receipt" ACTION="Create">
-      <DATE>{tally_date}</DATE>
-      <VOUCHERTYPENAME>Receipt</VOUCHERTYPENAME>
-      <PARTYLEDGERNAME>{party_clean}</PARTYLEDGERNAME>
-      <NARRATION>{narr_clean}</NARRATION>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>{bank_clean}</LEDGERNAME>
-        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-        <AMOUNT>-{amount_str}</AMOUNT>
-      </ALLLEDGERENTRIES.LIST>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>{party_clean}</LEDGERNAME>
-        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-        <AMOUNT>{amount_str}</AMOUNT>
-      </ALLLEDGERENTRIES.LIST>
-    </VOUCHER>
-  </TALLYMESSAGE></DATA></BODY>
-</ENVELOPE>"""
+        ledger_entries = f"""
+        <ALLLEDGERENTRIES.LIST>
+          <LEDGERNAME>{bank_clean}</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <AMOUNT>-{amount_str}</AMOUNT>
+        </ALLLEDGERENTRIES.LIST>
+        <ALLLEDGERENTRIES.LIST>
+          <LEDGERNAME>{party_clean}</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+          <AMOUNT>{amount_str}</AMOUNT>
+        </ALLLEDGERENTRIES.LIST>"""
     elif v_type == "Contra":
-        return f"""<ENVELOPE>
-  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Import</TALLYREQUEST><TYPE>Data</TYPE><ID>Vouchers</ID></HEADER>
-  <BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>{comp_clean}</SVCURRENTCOMPANY></STATICVARIABLES></DESC>
-  <DATA><TALLYMESSAGE>
-    <VOUCHER VCHTYPE="Contra" ACTION="Create">
-      <DATE>{tally_date}</DATE>
-      <VOUCHERTYPENAME>Contra</VOUCHERTYPENAME>
-      <NARRATION>{narr_clean}</NARRATION>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>{bank_clean}</LEDGERNAME>
-        <ISDEEMEDPOSITIVE>{"Yes" if txn.get("deposit", 0) > 0 else "No"}</ISDEEMEDPOSITIVE>
-        <AMOUNT>{"-" if txn.get("deposit", 0) > 0 else ""}{amount_str}</AMOUNT>
-      </ALLLEDGERENTRIES.LIST>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>{party_clean}</LEDGERNAME>
-        <ISDEEMEDPOSITIVE>{"No" if txn.get("deposit", 0) > 0 else "Yes"}</ISDEEMEDPOSITIVE>
-        <AMOUNT>{"" if txn.get("deposit", 0) > 0 else "-"}{amount_str}</AMOUNT>
-      </ALLLEDGERENTRIES.LIST>
-    </VOUCHER>
-  </TALLYMESSAGE></DATA></BODY>
-</ENVELOPE>"""
+        is_dep = txn.get("deposit", 0) > 0
+        ledger_entries = f"""
+        <ALLLEDGERENTRIES.LIST>
+          <LEDGERNAME>{bank_clean}</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>{"Yes" if is_dep else "No"}</ISDEEMEDPOSITIVE>
+          <AMOUNT>{"-" if is_dep else ""}{amount_str}</AMOUNT>
+        </ALLLEDGERENTRIES.LIST>
+        <ALLLEDGERENTRIES.LIST>
+          <LEDGERNAME>{party_clean}</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>{"No" if is_dep else "Yes"}</ISDEEMEDPOSITIVE>
+          <AMOUNT>{"" if is_dep else "-"}{amount_str}</AMOUNT>
+        </ALLLEDGERENTRIES.LIST>"""
     else:  # Payment
-        return f"""<ENVELOPE>
-  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Import</TALLYREQUEST><TYPE>Data</TYPE><ID>Vouchers</ID></HEADER>
-  <BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>{comp_clean}</SVCURRENTCOMPANY></STATICVARIABLES></DESC>
-  <DATA><TALLYMESSAGE>
-    <VOUCHER VCHTYPE="Payment" ACTION="Create">
-      <DATE>{tally_date}</DATE>
-      <VOUCHERTYPENAME>Payment</VOUCHERTYPENAME>
-      <PARTYLEDGERNAME>{party_clean}</PARTYLEDGERNAME>
-      <NARRATION>{narr_clean}</NARRATION>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>{party_clean}</LEDGERNAME>
-        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-        <AMOUNT>-{amount_str}</AMOUNT>
-      </ALLLEDGERENTRIES.LIST>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>{bank_clean}</LEDGERNAME>
-        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-        <AMOUNT>{amount_str}</AMOUNT>
-      </ALLLEDGERENTRIES.LIST>
-    </VOUCHER>
-  </TALLYMESSAGE></DATA></BODY>
+        ledger_entries = f"""
+        <ALLLEDGERENTRIES.LIST>
+          <LEDGERNAME>{party_clean}</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <AMOUNT>-{amount_str}</AMOUNT>
+        </ALLLEDGERENTRIES.LIST>
+        <ALLLEDGERENTRIES.LIST>
+          <LEDGERNAME>{bank_clean}</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+          <AMOUNT>{amount_str}</AMOUNT>
+        </ALLLEDGERENTRIES.LIST>"""
+
+    return f"""<ENVELOPE>
+  <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
+  <BODY>
+    <IMPORTDATA>
+      <REQUESTDESC>
+        <REPORTNAME>Vouchers</REPORTNAME>
+        {comp_tag}
+      </REQUESTDESC>
+      <REQUESTDATA>
+        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+          <VOUCHER VCHTYPE="{v_type}" ACTION="Create">
+            <DATE>{tally_date}</DATE>
+            <VOUCHERTYPENAME>{v_type}</VOUCHERTYPENAME>
+            <PARTYLEDGERNAME>{party_clean}</PARTYLEDGERNAME>
+            <NARRATION>{narr_clean}</NARRATION>
+            {ledger_entries}
+          </VOUCHER>
+        </TALLYMESSAGE>
+      </REQUESTDATA>
+    </IMPORTDATA>
+  </BODY>
 </ENVELOPE>"""
-
-
 def voucher_delete_envelope(voucher_xml: str) -> str:
     return f"""
 <ENVELOPE>
@@ -3267,6 +3262,17 @@ class DestockHandler(SimpleHTTPRequestHandler):
         if self.path.startswith("/api/ping"):
             json_response(self, {"ok": True})
             return
+        if self.path.startswith("/api/connector/task-status"):
+            # The web app polls this with GET to show live voucher progress.
+            query = parse_qs(urlparse(self.path).query)
+            task_id = (query.get("id") or query.get("taskId") or [""])[0]
+            username = (query.get("username") or ["guest-01"])[0]
+            result = get_connector(username)["completed"].get(task_id)
+            if result:
+                json_response(self, {"ok": True, "completed": True, "result": result})
+            else:
+                json_response(self, {"ok": True, "completed": False})
+            return
         if self.path.startswith("/api/tally/status"):
             json_response(self, tally_status())
             return
@@ -3898,14 +3904,12 @@ class DestockHandler(SimpleHTTPRequestHandler):
             txn_ids = data.get("transactionIds", [])
             username = data.get("username", "guest-01")
 
-            # Check the Connector BEFORE touching any row, so an offline Connector
-            # never leaves transactions stuck in the "queued" state.
-            conn_client = get_connector(username)
-            if not conn_client["online"]:
+            # Refuse BEFORE touching any row, so an offline Connector never leaves
+            # transactions stuck in the "queued" state.
+            if not get_connector(username)["online"]:
                 json_response(self, {"error": "Tally Automation Connector is offline. Please launch Tally Connector on your desktop."}, 400)
                 return
 
-            skipped_sent = 0
             with db() as conn:
                 stmt = conn.execute("SELECT * FROM bank_statements WHERE id=?", (stmt_id,)).fetchone()
                 if not stmt:
@@ -3915,13 +3919,19 @@ class DestockHandler(SimpleHTTPRequestHandler):
                 bank_ledger = target_bl or stmt["bank_ledger"] or "Bank Accounts"
                 if target_bl and target_bl != stmt["bank_ledger"]:
                     conn.execute("UPDATE bank_statements SET bank_ledger=? WHERE id=?", (target_bl, stmt_id))
+                
                 comp_row = conn.execute("SELECT value FROM settings WHERE key='active_company'").fetchone()
-                active_company = (comp_row["value"] if comp_row else "") or conn_client.get("activeCompany", "")
+                active_company = (data.get("company") or "").strip() or (comp_row["value"] if comp_row else "")
 
+                conn_client = get_connector(username)
+                if not active_company and conn_client.get("company"):
+                    active_company = conn_client.get("company")
+
+                # Strictly send ONLY the requested transaction IDs and skip already sent rows
                 if txn_ids:
                     placeholders = ",".join("?" for _ in txn_ids)
                     rows = conn.execute(
-                        f"SELECT * FROM bank_transactions WHERE statement_id=? AND id IN ({placeholders})",
+                        f"SELECT * FROM bank_transactions WHERE statement_id=? AND id IN ({placeholders}) AND send_status != 'sent'",
                         [stmt_id, *txn_ids],
                     ).fetchall()
                 else:
@@ -3931,9 +3941,6 @@ class DestockHandler(SimpleHTTPRequestHandler):
                 for r in rows:
                     if not r["assigned_ledger"]:
                         continue
-                    if r["send_status"] == "sent":
-                        skipped_sent += 1  # never create a duplicate voucher in Tally
-                        continue
                     r_dict = dict(r)
                     xml = generate_bank_voucher_xml(active_company, bank_ledger, r_dict)
                     vouchers_to_dispatch.append({
@@ -3942,8 +3949,12 @@ class DestockHandler(SimpleHTTPRequestHandler):
                     })
                     conn.execute("UPDATE bank_transactions SET send_status='queued', updated_at=? WHERE id=?", (now_iso(), r["id"]))
 
-            if not vouchers_to_dispatch:
-                json_response(self, {"ok": True, "queued": 0, "skippedAlreadySent": skipped_sent, "message": "Nothing to send: no ready rows."})
+            if not conn_client["online"]:
+                json_response(self, {"error": "Tally Automation Connector is offline. Please launch Tally Connector on your desktop."}, 400)
+                return
+
+            if len(vouchers_to_dispatch) == 0:
+                json_response(self, {"error": "No sendable transactions found. Selected rows may already be sent to TallyPrime or are missing assigned ledgers."}, 400)
                 return
 
             task_id = f"bank_send_{uuid.uuid4().hex[:8]}"
@@ -3953,7 +3964,7 @@ class DestockHandler(SimpleHTTPRequestHandler):
                 "payload": {"vouchers": vouchers_to_dispatch}
             })
 
-            json_response(self, {"ok": True, "queued": len(vouchers_to_dispatch), "skippedAlreadySent": skipped_sent, "taskId": task_id})
+            json_response(self, {"ok": True, "queued": len(vouchers_to_dispatch), "taskId": task_id})
             return
         if self.path.startswith("/api/tally/send"):
             data = read_json(self)

@@ -4107,13 +4107,15 @@ function toggleSelectAllBankRows(masterCheckbox) {
 }
 
 function toggleBankRowSelect(id) {
+  const t = (state.bankImportTransactions || []).find((x) => x.id === id);
+  if (t && t.send_status === "sent") return;
   const idx = state.bankImportSelectedIds.indexOf(id);
   if (idx > -1) {
     state.bankImportSelectedIds.splice(idx, 1);
   } else {
     state.bankImportSelectedIds.push(id);
   }
-  renderBankImportTableContainer();
+  render();
 }
 
 async function bulkAssignBankLedger(ledgerName, options = {}) {
@@ -4376,12 +4378,24 @@ async function sendBankVouchersToTally(mode) {
   let targets = [];
 
   if (mode === "test_one") {
-    const candidate = all.find((t) => t.assigned_ledger && t.send_status !== "sent" && (!state.bankImportSelectedIds.length || state.bankImportSelectedIds.includes(t.id)));
-    if (!candidate) {
-      setNotice("No ready transactions found to send for testing.");
-      return;
+    if (state.bankImportSelectedIds.length > 0) {
+      const candidateId = state.bankImportSelectedIds.find((id) => {
+        const t = all.find((x) => x.id === id);
+        return t && t.assigned_ledger && t.send_status !== "sent";
+      });
+      if (!candidateId) {
+        setNotice("None of the selected rows have a ledger assigned or they are already sent.");
+        return;
+      }
+      targets = [candidateId];
+    } else {
+      const candidate = all.find((t) => t.assigned_ledger && t.send_status !== "sent");
+      if (!candidate) {
+        setNotice("No ready transactions found to send for testing.");
+        return;
+      }
+      targets = [candidate.id];
     }
-    targets = [candidate.id];
   } else if (mode === "selected") {
     targets = state.bankImportSelectedIds.filter((id) => {
       const t = all.find((item) => item.id === id);
@@ -4397,7 +4411,7 @@ async function sendBankVouchersToTally(mode) {
       setNotice("No ready vouchers to dispatch. Please assign ledgers first.");
       return;
     }
-    if (!confirm(`Confirm dispatching ${targets.length} vouchers to ${state.masters.activeCompany || state.tally.company || "TallyPrime"}?`)) {
+    if (!confirm(`Confirm dispatching ALL ${targets.length} ready vouchers to ${state.masters.activeCompany || state.tally.company || "TallyPrime"}?`)) {
       return;
     }
   }
@@ -4409,9 +4423,9 @@ async function sendBankVouchersToTally(mode) {
     sent: 0,
     succeeded: 0,
     failed: 0,
-    percent: 0,
-    step: `Preparing to dispatch ${targets.length} vouchers...`,
-    logs: [`[${new Date().toLocaleTimeString()}] Initializing dispatch queue for ${targets.length} vouchers...`],
+    percent: 15,
+    step: `Enqueuing ${targets.length} vouchers to Desktop Connector...`,
+    logs: [`[${new Date().toLocaleTimeString()}] Enqueuing ${targets.length} voucher(s) for ${state.tally?.company || "TallyPrime"}...`],
     completed: false
   };
 
@@ -4426,43 +4440,100 @@ async function sendBankVouchersToTally(mode) {
         statementId: state.bankImportStatement.id,
         transactionIds: targets,
         targetBankLedger: state.bankImportTargetLedger || "Bank Accounts",
+        company: state.tally?.company || state.selectedTallyCompany || "",
         username: "guest-01",
       }),
     });
 
-    if (res && res.ok) {
+    if (res && res.ok && res.taskId) {
+      // Mark queued locally
       for (const t of state.bankImportTransactions) {
         if (targets.includes(t.id)) {
           t.send_status = "queued";
         }
       }
       persistLastTask();
+      renderBankImportTableContainer();
 
-      // Sequential streaming animation with itemized logging
-      const total = targets.length;
-      for (let i = 0; i < total; i++) {
-        const item = targetRows[i] || {};
-        const party = item.assigned_ledger || "Unknown Party";
-        const amt = item.deposit > 0 ? `₹${Number(item.deposit).toLocaleString()}` : `₹${Number(item.withdrawal).toLocaleString()}`;
-        const type = item.deposit > 0 ? "Receipt" : "Payment";
-        const pct = Math.round(((i + 1) / total) * 100);
-        
-        state.dispatchProgress.sent = i + 1;
-        state.dispatchProgress.succeeded = i + 1;
-        state.dispatchProgress.percent = pct;
-        state.dispatchProgress.step = `Sending Voucher #${i + 1} of ${total} (${type} to ${party})...`;
-        state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] ⚡ #${i + 1}: ${amt} -> ${party} [${type}] Dispatched to Connector`);
-        
-        if (total <= 20 || i % Math.max(1, Math.floor(total / 20)) === 0 || i === total - 1) {
-          render();
-          await new Promise((r) => setTimeout(r, 40));
+      state.dispatchProgress.percent = 35;
+      state.dispatchProgress.step = `Dispatched to Desktop Connector. Waiting for TallyPrime response...`;
+      state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] Task ID: ${res.taskId}. Polling Desktop Connector execution on Port 9000...`);
+      render();
+
+      // Poll task status until complete
+      const taskId = res.taskId;
+      let isDone = false;
+      const pollStart = Date.now();
+
+      while (!isDone && (Date.now() - pollStart < 90000)) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          const pollRes = await api(`/api/connector/task-status?id=${encodeURIComponent(taskId)}&username=guest-01`);
+          if (pollRes && pollRes.completed && pollRes.result) {
+            isDone = true;
+            const taskData = pollRes.result.data || {};
+            const vResults = taskData.voucherResults || [];
+            const importedCount = taskData.imported || 0;
+            const failedCount = taskData.failed || 0;
+
+            const resMap = {};
+            for (const vr of vResults) {
+              resMap[vr.id] = vr;
+            }
+
+            for (const t of state.bankImportTransactions) {
+              if (resMap[t.id]) {
+                const vr = resMap[t.id];
+                if (vr.status === "imported") {
+                  t.send_status = "sent";
+                  t.send_error = "";
+                } else {
+                  t.send_status = "failed";
+                  t.send_error = vr.message || "Tally rejected";
+                }
+              }
+            }
+
+            // Deselect the sent transactions
+            state.bankImportSelectedIds = state.bankImportSelectedIds.filter((id) => !targets.includes(id));
+            persistLastTask();
+            renderBankImportTableContainer();
+
+            // Finish modal
+            state.dispatchProgress.percent = 100;
+            state.dispatchProgress.completed = true;
+            state.dispatchProgress.succeeded = importedCount;
+            state.dispatchProgress.failed = failedCount;
+            state.dispatchProgress.sent = targets.length;
+            state.dispatchProgress.step = `Import complete: ${importedCount} succeeded, ${failedCount} failed.`;
+            
+            for (const vr of vResults) {
+              const sign = vr.status === "imported" ? "✅" : "❌";
+              state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] ${sign} Transaction ID ${vr.id.slice(0, 8)}: ${vr.message || vr.status}`);
+            }
+
+            state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] 🎉 Finished! ${importedCount} vouchers permanently imported into TallyPrime.`);
+            setNotice(`🎉 Successfully imported ${importedCount} vouchers into TallyPrime!`);
+            render();
+            return;
+          } else {
+            state.dispatchProgress.percent = Math.min(95, state.dispatchProgress.percent + 5);
+            state.dispatchProgress.step = `Desktop Connector is writing vouchers to TallyPrime...`;
+            render();
+          }
+        } catch (pollErr) {
+          console.warn("Poll error:", pollErr);
         }
       }
 
-      state.dispatchProgress.completed = true;
-      state.dispatchProgress.step = "Sequential dispatch stream completed!";
-      state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] 🎉 All ${total} vouchers successfully received by Tally Connector queue.`);
-      setNotice(`Dispatched ${total} vouchers to TallyPrime!`);
+      if (!isDone) {
+        state.dispatchProgress.completed = true;
+        state.dispatchProgress.step = "Dispatch request handed to Desktop Connector. Refreshing...";
+        state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] Task is processing in background. Fetching latest database status...`);
+        if (state.bankImportStatement?.id) {
+          await loadBankStatementDetails(state.bankImportStatement.id);
+        }
+      }
     } else {
       state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] ❌ Error: ${res?.error || "Failed to queue vouchers."}`);
       setNotice(res?.error || "Failed to queue vouchers.");
@@ -4478,6 +4549,11 @@ async function sendBankVouchersToTally(mode) {
   }
 }
 
+function clearBankSelection() {
+  state.bankImportSelectedIds = [];
+  renderBankImportTableContainer();
+  render();
+}
 function renderBankImportTableContainer() {
   const container = document.getElementById("bank-import-table-container");
   if (container) {
@@ -4526,11 +4602,11 @@ function renderBankTransactionsTable() {
         // Readiness calculation
         let readinessBadge = "";
         if (item.send_status === "sent") {
-          readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center gap-1 w-max"><span class="material-symbols-outlined text-[13px]">check</span>Sent</span>`;
+          readinessBadge = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 flex items-center gap-1.5 w-max shadow-sm"><span class="material-symbols-outlined text-[14px]">check_circle</span>Completed</span>`;
         } else if (item.send_status === "failed") {
-          readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1 w-max" title="${escapeHtml(item.send_error || "Tally Rejected")}"><span class="material-symbols-outlined text-[13px]">error</span>Failed</span>`;
+          readinessBadge = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-rose-500/15 text-rose-500 border border-rose-500/30 flex items-center gap-1.5 w-max" title="${escapeHtml(item.send_error || "Tally Rejected")}"><span class="material-symbols-outlined text-[14px]">error</span>Failed</span>`;
         } else if (item.send_status === "queued") {
-          readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1 w-max"><span class="material-symbols-outlined text-[13px] animate-spin">sync</span>Queued</span>`;
+          readinessBadge = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-600 border border-amber-500/30 flex items-center gap-1.5 w-max animate-pulse"><span class="material-symbols-outlined text-[14px] animate-spin">sync</span>Processing</span>`;
         } else if (item.assigned_ledger && isOnline) {
           readinessBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1 w-max"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>Ready</span>`;
         } else if (item.assigned_ledger && !isOnline) {
@@ -4551,7 +4627,11 @@ function renderBankTransactionsTable() {
         return `
           <tr class="border-b border-outline-variant/10 transition-colors ${isSelected ? "bg-primary/10" : isLocked ? "bg-white/[0.02]" : "hover:bg-white/[0.03]"}">
             <td class="p-3 text-center">
+              ${item.send_status === "sent" ? `
+              <span class="material-symbols-outlined text-emerald-500 text-[18px] select-none" title="Voucher already imported into TallyPrime">check_circle</span>
+            ` : `
               <input type="checkbox" class="w-4 h-4 rounded border-outline-variant/40 bg-surface-container text-primary focus:ring-primary cursor-pointer" ${isSelected ? "checked" : ""} onchange="toggleBankRowSelect('${item.id}')" />
+            `}
             </td>
             <td class="p-3 text-xs font-mono text-outline/80 whitespace-nowrap">${escapeHtml(item.date)}</td>
             <td class="p-3">
@@ -5007,6 +5087,13 @@ function bankImportScreen() {
               Assign & Lock
             </button>
 
+            <button 
+              class="px-5 py-1.5 rounded-xl bg-primary text-white font-black hover:shadow-md hover:shadow-primary/25 transition-all flex items-center gap-1.5 ml-2"
+              onclick="sendBankVouchersToTally('selected')">
+              <span class="material-symbols-outlined text-[16px]">send</span>
+              Send Selected (${state.bankImportSelectedIds.length}) to Tally
+            </button>
+
             ${
               state.bankImportSearch
                 ? `
@@ -5042,39 +5129,54 @@ function bankImportScreen() {
     <!-- Step 4: Bottom Send to Tally Action Bar -->
     <div class="glass-pro p-6 rounded-[2rem] border border-outline-variant/30 flex flex-col sm:flex-row items-center justify-between gap-4">
       <div class="text-xs text-outline">
-        <span>Ready vouchers will be converted to standard Tally XML and dispatched sequentially via the desktop connector.</span>
+        ${
+          state.bankImportSelectedIds.length > 0
+            ? `<span class="text-primary font-bold">${state.bankImportSelectedIds.length} transaction(s) selected</span>. Only selected transactions will be dispatched.`
+            : `<span>Ready vouchers will be converted to standard Tally XML and dispatched sequentially via the desktop connector.</span>`
+        }
       </div>
 
       <div class="flex items-center gap-3">
-        <button 
-          class="px-4 py-2.5 rounded-xl border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container transition-all ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
-          onclick="sendBankVouchersToTally('test_one')"
-          ${state.bankImportSendBusy ? "disabled" : ""}>
-          Send 1 for Testing
-        </button>
-
         ${
           state.bankImportSelectedIds.length > 0
             ? `
           <button 
-            class="px-5 py-2.5 rounded-xl bg-primary/20 text-primary border border-primary/30 text-xs font-bold hover:bg-primary hover:text-white transition-all ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
+            class="px-4 py-2.5 rounded-xl border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container transition-all ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
+            onclick="sendBankVouchersToTally('test_one')"
+            ${state.bankImportSendBusy ? "disabled" : ""}>
+            Test 1 of Selected
+          </button>
+          <button 
+            class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-black shadow-lg shadow-primary/25 hover:brightness-110 transition-all flex items-center gap-2 ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
             onclick="sendBankVouchersToTally('selected')"
             ${state.bankImportSendBusy ? "disabled" : ""}>
-            Send Selected (${state.bankImportSelectedIds.length})
+            <span class="material-symbols-outlined text-[18px]">send</span>
+            <span>Send Selected (${state.bankImportSelectedIds.length}) to TallyPrime</span>
+          </button>
+          <button 
+            class="text-xs text-outline font-bold hover:text-on-surface px-3 py-2 rounded-lg hover:bg-surface-container transition-colors"
+            onclick="clearBankSelection()">
+            Cancel Selection
           </button>
         `
-            : ""
+            : `
+          <button 
+            class="px-4 py-2.5 rounded-xl border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container transition-all ${state.bankImportSendBusy ? "opacity-50 cursor-not-allowed" : ""}"
+            onclick="sendBankVouchersToTally('test_one')"
+            ${state.bankImportSendBusy ? "disabled" : ""}>
+            Send 1 for Testing
+          </button>
+          <button 
+            class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-bold hover:shadow-lg hover:shadow-primary/20 transition-all flex items-center gap-2 ${state.bankImportSendBusy || readyCount === 0 ? "opacity-50 cursor-not-allowed" : ""}"
+            onclick="sendBankVouchersToTally('all_ready')"
+            ${state.bankImportSendBusy || readyCount === 0 ? "disabled" : ""}>
+            <span class="material-symbols-outlined text-[18px] ${state.bankImportSendBusy ? "animate-spin" : ""}">
+              ${state.bankImportSendBusy ? "progress_activity" : "send"}
+            </span>
+            <span>${state.bankImportSendBusy ? "Dispatching to Tally..." : `Send All Ready (${readyCount})`}</span>
+          </button>
+        `
         }
-
-        <button 
-          class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-bold hover:shadow-lg hover:shadow-primary/20 transition-all flex items-center gap-2 ${state.bankImportSendBusy || readyCount === 0 ? "opacity-50 cursor-not-allowed" : ""}"
-          onclick="sendBankVouchersToTally('all_ready')"
-          ${state.bankImportSendBusy || readyCount === 0 ? "disabled" : ""}>
-          <span class="material-symbols-outlined text-[18px] ${state.bankImportSendBusy ? "animate-spin" : ""}">
-            ${state.bankImportSendBusy ? "progress_activity" : "send"}
-          </span>
-          <span>${state.bankImportSendBusy ? "Dispatching to Tally..." : `Send All Ready (${readyCount})`}</span>
-        </button>
       </div>
     </div>
   `
