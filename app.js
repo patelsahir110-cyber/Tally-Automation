@@ -10,6 +10,7 @@ const screens = {
   upload: { title: "Upload Excel" },
   mapping: { title: "Validation & Mapping" },
   success: { title: "Send to Tally" },
+  bank_dispatch: { title: "Voucher Dispatch Stream" },
 };
 
 const state = {
@@ -199,7 +200,13 @@ function setNotice(message) {
   render();
 }
 
-function go(screen) {
+function go(screen, pushHistory = true) {
+  if (pushHistory) {
+    if (!state.navigationHistory) state.navigationHistory = [];
+    if (state.navigationHistory[state.navigationHistory.length - 1] !== screen) {
+      state.navigationHistory.push(screen);
+    }
+  }
   try {
     history.replaceState(null, "", `#${screen}`);
   } catch (e) {
@@ -207,6 +214,24 @@ function go(screen) {
   }
   state.route = screen;
   render();
+}
+
+function navigateBack() {
+  if (state.navigationHistory && state.navigationHistory.length > 1) {
+    state.navigationHistory.pop(); // remove current
+    const prev = state.navigationHistory[state.navigationHistory.length - 1] || "dashboard";
+    go(prev, false);
+  } else if (state.route === "bank_dispatch") {
+    go("bank_import", false);
+  } else if (state.route === "bank_import" || state.route === "masters" || state.route === "sync" || state.route === "automation") {
+    go("dashboard", false);
+  } else {
+    window.history.back();
+  }
+}
+
+function navigateForward() {
+  window.history.forward();
 }
 
 function activeStatus() {
@@ -409,7 +434,16 @@ function tailwindShell(active, content) {
       <main class="flex-1 flex flex-col h-screen overflow-hidden relative">
         <!-- TopAppBar -->
         <header class="h-20 shrink-0 border-b border-outline-variant/30 px-10 flex items-center justify-between z-10 bg-white/40 backdrop-blur-md">
-          <div class="flex items-center gap-8 flex-1 max-w-3xl">
+          <div class="flex items-center gap-4 flex-1 max-w-3xl">
+            <!-- Top History Navigation: Go Back -->
+            <button 
+              class="px-3.5 py-2 rounded-xl bg-surface-container-low border border-outline-variant/40 hover:bg-primary hover:text-white text-on-surface font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm shrink-0 group"
+              title="Go back to previous screen"
+              onclick="navigateBack()">
+              <span class="material-symbols-outlined text-[18px] group-hover:-translate-x-0.5 transition-transform">arrow_back</span>
+              <span class="font-bold">Back</span>
+            </button>
+
             <div class="relative w-full max-w-lg">
               <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline/50 text-[20px]">search</span>
               <input class="w-full bg-white/60 border border-outline-variant/40 rounded-xl pl-12 pr-4 py-2.5 text-body-md focus:ring-4 focus:ring-primary/10 focus:border-primary/40 transition-all placeholder:text-outline/40" placeholder="Global search vouchers, ledgers or sync logs..." type="text" value="${escapeHtml(state.globalSearchQuery || "")}" oninput="handleGlobalSearch(this.value)">
@@ -525,7 +559,7 @@ function tailwindShell(active, content) {
           </div>
         </header>
         <!-- Content Canvas -->
-        <div class="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar pb-20 bg-background/10">
+        <div id="main-scroll-canvas" class="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar pb-20 bg-background/10">
           ${showStepper ? stepperTailwind(active) : ""}
           ${state.notice ? `
             <div class="p-5 bg-slate-900 text-white rounded-2xl border border-slate-800 text-body-lg font-bold flex justify-between items-center shrink-0 shadow-lg select-none">
@@ -4413,26 +4447,29 @@ async function sendBankVouchersToTally(mode) {
       setNotice("No ready vouchers to dispatch. Please assign ledgers first.");
       return;
     }
-    if (!confirm(`Confirm dispatching ALL ${targets.length} ready vouchers to ${state.masters.activeCompany || state.tally.company || "TallyPrime"}?`)) {
-      return;
-    }
   }
 
   const targetRows = all.filter((t) => targets.includes(t.id));
-  state.dispatchProgress = {
-    open: true,
+  
+  // Set up full-page dispatch state
+  state.activeDispatch = {
     total: targets.length,
+    targetIds: targets,
+    targetRows: targetRows.map(r => ({ ...r })),
     sent: 0,
     succeeded: 0,
     failed: 0,
-    percent: 15,
+    percent: 10,
+    currentIdx: 0,
     step: `Enqueuing ${targets.length} vouchers to Desktop Connector...`,
-    logs: [`[${new Date().toLocaleTimeString()}] Enqueuing ${targets.length} voucher(s) for ${state.tally?.company || "TallyPrime"}...`],
-    completed: false
+    logs: [`[${new Date().toLocaleTimeString()}] Starting sequential dispatch stream for ${targets.length} vouchers...`],
+    completed: false,
+    startTime: Date.now()
   };
 
   state.bankImportSendBusy = true;
-  render();
+  // Navigate immediately to the dedicated full-page dispatch view!
+  go("bank_dispatch");
 
   try {
     const res = await api("/api/bank-statement/send-tally", {
@@ -4448,27 +4485,39 @@ async function sendBankVouchersToTally(mode) {
     });
 
     if (res && res.ok && res.taskId) {
-      // Mark queued locally
+      // Mark queued in memory
       for (const t of state.bankImportTransactions) {
         if (targets.includes(t.id)) {
           t.send_status = "queued";
         }
       }
       persistLastTask();
-      renderBankImportTableContainer();
 
-      state.dispatchProgress.percent = 35;
-      state.dispatchProgress.step = `Dispatched to Desktop Connector. Waiting for TallyPrime response...`;
-      state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] Task ID: ${res.taskId}. Polling Desktop Connector execution on Port 9000...`);
+      state.activeDispatch.percent = 25;
+      state.activeDispatch.step = `Task registered (ID: ${res.taskId}). Desktop Connector is writing to TallyPrime Port 9000...`;
+      state.activeDispatch.logs.push(`[${new Date().toLocaleTimeString()}] Task ${res.taskId} accepted by cloud queue. Polling desktop connector...`);
       render();
 
-      // Poll task status until complete
       const taskId = res.taskId;
       let isDone = false;
       const pollStart = Date.now();
+      let simIndex = 0;
 
-      while (!isDone && (Date.now() - pollStart < 90000)) {
+      while (!isDone && (Date.now() - pollStart < 120000)) {
         await new Promise((r) => setTimeout(r, 1000));
+        
+        // Advance simulated step progress while waiting
+        if (simIndex < targets.length) {
+          const rowItem = targetRows[simIndex] || {};
+          const vType = rowItem.deposit > 0 ? "Receipt" : "Payment";
+          const party = rowItem.assigned_ledger || "Party";
+          state.activeDispatch.currentIdx = simIndex;
+          state.activeDispatch.step = `Streaming Voucher #${simIndex + 1} of ${targets.length}: ${vType} to ${party}...`;
+          state.activeDispatch.percent = Math.min(95, Math.round(((simIndex + 1) / (targets.length + 1)) * 100));
+          simIndex++;
+          render();
+        }
+
         try {
           const pollRes = await api(`/api/connector/task-status?id=${encodeURIComponent(taskId)}&username=guest-01`);
           if (pollRes && pollRes.completed && pollRes.result) {
@@ -4483,6 +4532,7 @@ async function sendBankVouchersToTally(mode) {
               resMap[vr.id] = vr;
             }
 
+            // Update main state and dispatch page state
             for (const t of state.bankImportTransactions) {
               if (resMap[t.id]) {
                 const vr = resMap[t.id];
@@ -4496,61 +4546,65 @@ async function sendBankVouchersToTally(mode) {
               }
             }
 
-            // Deselect the sent transactions
+            for (const dr of state.activeDispatch.targetRows) {
+              if (resMap[dr.id]) {
+                const vr = resMap[dr.id];
+                dr.send_status = vr.status === "imported" ? "sent" : "failed";
+                dr.send_error = vr.message || "";
+              }
+            }
+
+            // Deselect sent transactions
             state.bankImportSelectedIds = state.bankImportSelectedIds.filter((id) => !targets.includes(id));
             persistLastTask();
-            renderBankImportTableContainer();
 
-            // Finish modal
-            state.dispatchProgress.percent = 100;
-            state.dispatchProgress.completed = true;
-            state.dispatchProgress.succeeded = importedCount;
-            state.dispatchProgress.failed = failedCount;
-            state.dispatchProgress.sent = targets.length;
-            state.dispatchProgress.step = `Import complete: ${importedCount} succeeded, ${failedCount} failed.`;
+            // Complete full-page dispatch state
+            state.activeDispatch.percent = 100;
+            state.activeDispatch.completed = true;
+            state.activeDispatch.succeeded = importedCount;
+            state.activeDispatch.failed = failedCount;
+            state.activeDispatch.sent = targets.length;
+            state.activeDispatch.step = `Dispatch Complete: ${importedCount} vouchers imported into TallyPrime, ${failedCount} failed.`;
             
             for (const vr of vResults) {
               const sign = vr.status === "imported" ? "✅" : "❌";
-              state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] ${sign} Transaction ID ${vr.id.slice(0, 8)}: ${vr.message || vr.status}`);
+              state.activeDispatch.logs.push(`[${new Date().toLocaleTimeString()}] ${sign} Voucher ${vr.id ? vr.id.slice(0, 8) : ""}: ${vr.message || vr.status}`);
             }
 
-            state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] 🎉 Finished! ${importedCount} vouchers permanently imported into TallyPrime.`);
-            setNotice(`🎉 Successfully imported ${importedCount} vouchers into TallyPrime!`);
+            state.activeDispatch.logs.push(`[${new Date().toLocaleTimeString()}] 🎉 Finished! ${importedCount} vouchers permanently created in TallyPrime Day Book.`);
             render();
             return;
-          } else {
-            state.dispatchProgress.percent = Math.min(95, state.dispatchProgress.percent + 5);
-            state.dispatchProgress.step = `Desktop Connector is writing vouchers to TallyPrime...`;
-            render();
           }
         } catch (pollErr) {
-          console.warn("Poll error:", pollErr);
+          console.warn("Poll status error:", pollErr);
         }
       }
 
       if (!isDone) {
-        state.dispatchProgress.completed = true;
-        state.dispatchProgress.step = "Dispatch request handed to Desktop Connector. Refreshing...";
-        state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] Task is processing in background. Fetching latest database status...`);
+        state.activeDispatch.completed = true;
+        state.activeDispatch.percent = 100;
+        state.activeDispatch.step = "Dispatch request processed by Desktop Connector. Refreshing...";
+        state.activeDispatch.logs.push(`[${new Date().toLocaleTimeString()}] Batch processed in background. Refreshing statement data...`);
         if (state.bankImportStatement?.id) {
           await loadBankStatementDetails(state.bankImportStatement.id);
         }
+        render();
       }
     } else {
-      state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] ❌ Error: ${res?.error || "Failed to queue vouchers."}`);
-      setNotice(res?.error || "Failed to queue vouchers.");
+      state.activeDispatch.logs.push(`[${new Date().toLocaleTimeString()}] ❌ Error: ${res?.error || "Failed to queue vouchers."}`);
+      state.activeDispatch.step = res?.error || "Failed to dispatch vouchers.";
+      render();
     }
   } catch (e) {
-    if (state.dispatchProgress) {
-      state.dispatchProgress.logs.push(`[${new Date().toLocaleTimeString()}] ❌ Dispatch exception: ${e.message}`);
+    if (state.activeDispatch) {
+      state.activeDispatch.logs.push(`[${new Date().toLocaleTimeString()}] ❌ Dispatch exception: ${e.message}`);
+      state.activeDispatch.step = "Error: " + e.message;
     }
-    setNotice("Dispatch error: " + e.message);
+    render();
   } finally {
     state.bankImportSendBusy = false;
-    render();
   }
 }
-
 function clearBankSelection() {
   state.bankImportSelectedIds = [];
   renderBankImportTableContainer();
@@ -4898,35 +4952,52 @@ function bankImportScreen() {
       </div>
     </div>
 
-    <!-- Tier 1: KPIs & Connection Summary -->
+    <!-- Tier 1: Accurate Real-Time Transaction KPIs -->
     <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
-      <div class="glass-pro p-4 rounded-2xl border border-outline-variant/20">
+      <!-- 1. Total Records -->
+      <div class="glass-pro p-4 rounded-2xl border border-outline-variant/20 shadow-sm">
         <div class="text-[10px] font-bold text-outline uppercase tracking-wider">Total Records</div>
         <div class="text-2xl font-black text-on-surface mt-1">${totalCount}</div>
+        <div class="text-[10px] text-outline font-semibold mt-0.5">Parsed transactions</div>
       </div>
-      <div class="glass-pro p-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/5">
-        <div class="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Ready to Dispatch
+
+      <!-- 2. Assigned Ledgers (Replaces Ready to Dispatch) -->
+      <div class="glass-pro p-4 rounded-2xl border border-primary/20 bg-primary/5 shadow-sm">
+        <div class="text-[10px] font-bold text-primary uppercase tracking-wider flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-primary"></span>Assigned Ledgers
         </div>
-        <div class="text-2xl font-black text-emerald-400 mt-1">${readyCount}</div>
+        <div class="text-2xl font-black text-primary mt-1">${assignedCount}</div>
+        <div class="text-[10px] text-primary/70 font-semibold mt-0.5">${totalCount > 0 ? Math.round((assignedCount / totalCount) * 100) : 0}% Reconciled</div>
       </div>
-      <div class="glass-pro p-4 rounded-2xl border border-amber-500/20 bg-amber-500/5">
-        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Unassigned
+
+      <!-- 3. Unassigned Transactions -->
+      <div class="glass-pro p-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 shadow-sm">
+        <div class="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>Unassigned
         </div>
-        <div class="text-2xl font-black text-amber-400 mt-1">${waitingCount}</div>
+        <div class="text-2xl font-black text-amber-500 mt-1">${waitingCount}</div>
+        <div class="text-[10px] text-amber-600/70 font-semibold mt-0.5">Needs ledger mapping</div>
       </div>
-      <div class="glass-pro p-4 rounded-2xl border border-blue-500/20 bg-blue-500/5">
-        <div class="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1">
-          <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>Imported in Tally
+
+      <!-- 4. Successfully Completed in Tally (Permanently locked, never repeats) -->
+      <div class="glass-pro p-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 shadow-sm">
+        <div class="text-[10px] font-bold text-emerald-600 uppercase tracking-wider flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Completed in Tally
         </div>
-        <div class="text-2xl font-black text-blue-400 mt-1">${sentCount}</div>
+        <div class="text-2xl font-black text-emerald-600 mt-1">${sentCount}</div>
+        <div class="text-[10px] text-emerald-700/70 font-semibold mt-0.5">Day Book entry verified</div>
       </div>
-      <div class="glass-pro p-4 rounded-2xl border border-rose-500/20 bg-rose-500/5">
-        <div class="text-[10px] font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1">
-          <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>Failed Rows
+
+      <!-- 5. Pending Dispatch or Failed -->
+      <div class="glass-pro p-4 rounded-2xl border ${failedCount > 0 ? "border-rose-500/20 bg-rose-500/5" : "border-blue-500/20 bg-blue-500/5"} shadow-sm">
+        <div class="text-[10px] font-bold ${failedCount > 0 ? "text-rose-500" : "text-blue-500"} uppercase tracking-wider flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full ${failedCount > 0 ? "bg-rose-500" : "bg-blue-500"}"></span>
+          ${failedCount > 0 ? "Failed Rows" : "Pending to Send"}
         </div>
-        <div class="text-2xl font-black text-rose-400 mt-1">${failedCount}</div>
+        <div class="text-2xl font-black ${failedCount > 0 ? "text-rose-500" : "text-blue-500"} mt-1">
+          ${failedCount > 0 ? failedCount : readyCount}
+        </div>
+        <div class="text-[10px] text-outline font-semibold mt-0.5">${failedCount > 0 ? "Needs correction" : "Ready for Tally"}</div>
       </div>
     </div>
 
@@ -8269,7 +8340,7 @@ function render(route = state.route) {
     }
   }
   state.route = targetRoute;
-  const views = { auth, plans, login, dashboard, masters: mastersScreen, bank_import: bankImportScreen, sync: syncScreen, automation, upload, mapping, success };
+  const views = { auth, plans, login, dashboard, masters: mastersScreen, bank_import: bankImportScreen, sync: syncScreen, automation, upload, mapping, success, bank_dispatch: bankDispatchScreen };
   
   // Modern Sapphire Toast Notice Banner
   const noticeBannerHtml = state.notice ? `
@@ -8282,14 +8353,24 @@ function render(route = state.route) {
     </div>
   ` : "";
 
+  // Capture exact scroll position before DOM update to prevent any jumping to top
+  const scrollCanvasBefore = document.getElementById("main-scroll-canvas");
+  const savedScrollTop = scrollCanvasBefore ? scrollCanvasBefore.scrollTop : (window.scrollY || document.documentElement.scrollTop || 0);
+
   if (state.route === "auth" || state.route === "plans") {
     document.getElementById("app").innerHTML = views[state.route]();
   } else {
-    // Inject notice banner inside the app's views dynamically, or keep it standard.
-    // In our tailwindShell we place state.notice, so let's render standard.
     document.getElementById("app").innerHTML = views[state.route]() + createLedgerModal() + alterLedgerModal() + (typeof bankHighlighterModal === "function" ? bankHighlighterModal() : "") + renderExpertSupportModal() + renderDispatchProgressModal();
   }
-  document.title = `${screens[state.route].title} - Tally Automation`;
+  document.title = `${screens[state.route]?.title || "Tally Automation"} - Tally Automation`;
+
+  // Instantly restore exact scroll position so user never gets thrown to the top!
+  const scrollCanvasAfter = document.getElementById("main-scroll-canvas");
+  if (scrollCanvasAfter && savedScrollTop > 0) {
+    scrollCanvasAfter.scrollTop = savedScrollTop;
+  } else if (savedScrollTop > 0) {
+    window.scrollTo(0, savedScrollTop);
+  }
 }
 
 window.addEventListener("keydown", (e) => {
@@ -8525,4 +8606,209 @@ function renderDispatchProgressModal() {
       </div>
     </div>
   `;
+}
+
+
+function bankDispatchScreen() {
+  const isOnline = Boolean(state.tally?.online);
+  const activeComp = state.masters?.activeCompany || state.tally?.company || "TallyPrime";
+  const dp = state.activeDispatch || {
+    total: 0,
+    targetRows: [],
+    sent: 0,
+    succeeded: 0,
+    failed: 0,
+    percent: 0,
+    step: "No dispatch task active.",
+    logs: [],
+    completed: true
+  };
+
+  const percent = Math.min(100, Math.max(0, dp.percent || 0));
+  const remaining = Math.max(0, dp.total - dp.succeeded - dp.failed);
+
+  return tailwindShell(
+    "bank_dispatch",
+    `
+    <!-- Hero Header with Return Button -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div class="flex items-center gap-4">
+        <button 
+          class="px-4 py-2.5 rounded-xl bg-surface-container-low border border-outline-variant/40 hover:bg-primary hover:text-white font-bold text-xs flex items-center gap-2 transition-all shadow-sm group"
+          onclick="go('bank_import')">
+          <span class="material-symbols-outlined text-[18px] group-hover:-translate-x-0.5 transition-transform">arrow_back</span>
+          <span>Back to Bank Import</span>
+        </button>
+        <div>
+          <h2 class="text-display-lg font-black text-primary leading-tight">Voucher Dispatch Stream</h2>
+          <p class="text-body-md text-outline/80">Real-time sequential voucher creation into TallyPrime (Port 9000).</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <div class="px-3.5 py-2 rounded-xl glass-pro border border-outline-variant/30 text-xs flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full ${isOnline ? "bg-emerald-500" : "bg-rose-500"} animate-pulse"></span>
+          <span class="font-bold text-on-surface">${isOnline ? "Connector Stream Active" : "Gateway Offline"}</span>
+          <span class="text-outline">(${escapeHtml(activeComp)})</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tier 1: Real-time Dispatch Metrics -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div class="glass-pro p-5 rounded-2xl border border-outline-variant/20 shadow-sm">
+        <div class="text-[10px] font-bold text-outline uppercase tracking-wider">Total Selected</div>
+        <div class="text-3xl font-black text-on-surface mt-1">${dp.total}</div>
+        <div class="text-[10px] text-outline font-semibold mt-0.5">Vouchers in batch</div>
+      </div>
+
+      <div class="glass-pro p-5 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 shadow-sm">
+        <div class="text-[10px] font-bold text-emerald-600 uppercase tracking-wider flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>Imported in Tally
+        </div>
+        <div class="text-3xl font-black text-emerald-600 mt-1">${dp.succeeded}</div>
+        <div class="text-[10px] text-emerald-700/70 font-semibold mt-0.5">Permanent Day Book entries</div>
+      </div>
+
+      <div class="glass-pro p-5 rounded-2xl border border-blue-500/20 bg-blue-500/5 shadow-sm">
+        <div class="text-[10px] font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>Remaining in Stream
+        </div>
+        <div class="text-3xl font-black text-blue-500 mt-1">${remaining}</div>
+        <div class="text-[10px] text-outline font-semibold mt-0.5">Sequential queue</div>
+      </div>
+
+      <div class="glass-pro p-5 rounded-2xl border ${dp.failed > 0 ? "border-rose-500/20 bg-rose-500/5" : "border-outline-variant/20"} shadow-sm">
+        <div class="text-[10px] font-bold ${dp.failed > 0 ? "text-rose-500" : "text-outline"} uppercase tracking-wider flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full ${dp.failed > 0 ? "bg-rose-500" : "bg-outline/40"}"></span>Failed / Rejected
+        </div>
+        <div class="text-3xl font-black ${dp.failed > 0 ? "text-rose-500" : "text-on-surface"} mt-1">${dp.failed}</div>
+        <div class="text-[10px] text-outline font-semibold mt-0.5">${dp.failed > 0 ? "Check Tally line errors" : "Zero errors"}</div>
+      </div>
+    </div>
+
+    <!-- Tier 2: Large Hero Progress Bar -->
+    <div class="glass-pro p-8 rounded-[2rem] border border-primary/20 bg-gradient-to-br from-primary/5 via-surface to-surface shadow-md space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div class="space-y-1">
+          <div class="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+            ${dp.completed ? `<span class="material-symbols-outlined text-emerald-500 text-[18px]">verified</span> STREAM COMPLETED` : `<span class="w-2 h-2 rounded-full bg-primary animate-ping"></span> DISPATCH IN PROGRESS`}
+          </div>
+          <div class="text-base font-bold text-on-surface font-mono">${escapeHtml(dp.step)}</div>
+        </div>
+        <div class="text-right">
+          <div class="text-4xl font-black text-primary">${percent}%</div>
+          <div class="text-xs font-bold text-outline">${dp.succeeded} of ${dp.total} Transferred</div>
+        </div>
+      </div>
+
+      <!-- Animated Progress Bar -->
+      <div class="w-full bg-surface-container-high h-4 rounded-full overflow-hidden p-0.5 border border-outline-variant/30 shadow-inner">
+        <div class="bg-gradient-to-r from-primary via-indigo-500 to-emerald-500 h-full rounded-full transition-all duration-300 shadow-md shadow-primary/30" style="width: ${percent}%"></div>
+      </div>
+    </div>
+
+    <!-- Tier 3: Itemized Vouchers Stream Table -->
+    <div class="glass-pro p-6 rounded-[2rem] border border-outline-variant/30 space-y-4 shadow-sm">
+      <div class="flex items-center justify-between">
+        <div>
+          <h3 class="text-base font-black text-on-surface">Dispatched Transactions in this Batch</h3>
+          <p class="text-xs text-outline">Itemized verification status for each selected bank transaction.</p>
+        </div>
+        ${dp.completed ? `
+          <button 
+            class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-black shadow-lg shadow-primary/25 hover:brightness-110 flex items-center gap-2 transition-all"
+            onclick="go('bank_import')">
+            <span class="material-symbols-outlined text-[18px]">check</span>
+            <span>Done &amp; Return to Bank Statement</span>
+          </button>
+        ` : ""}
+      </div>
+
+      <div class="overflow-x-auto rounded-2xl border border-outline-variant/20">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="border-b border-outline-variant/20 bg-surface-container-low/60 text-outline uppercase font-label-caps text-[10px] tracking-wider">
+              <th class="p-3 text-center w-12">#</th>
+              <th class="p-3">Date</th>
+              <th class="p-3">Type</th>
+              <th class="p-3">Particulars (Narration)</th>
+              <th class="p-3">Assigned Ledger (Party)</th>
+              <th class="p-3 text-right">Amount</th>
+              <th class="p-3 text-right">Tally Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-outline-variant/10">
+            ${(dp.targetRows || []).map((t, idx) => {
+              const amt = t.deposit > 0 ? Number(t.deposit).toLocaleString("en-IN", { minimumFractionDigits: 2 }) : Number(t.withdrawal).toLocaleString("en-IN", { minimumFractionDigits: 2 });
+              const isSent = t.send_status === "sent";
+              const isFailed = t.send_status === "failed";
+              const isCurrent = !dp.completed && !isSent && !isFailed && idx === dp.currentIdx;
+
+              let statusHtml = "";
+              if (isSent) {
+                statusHtml = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 flex items-center gap-1.5 justify-end"><span class="material-symbols-outlined text-[14px]">check_circle</span>Completed</span>`;
+              } else if (isFailed) {
+                statusHtml = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-rose-500/15 text-rose-500 border border-rose-500/30 flex items-center gap-1.5 justify-end" title="${escapeHtml(t.send_error || "Rejected")}"><span class="material-symbols-outlined text-[14px]">error</span>Failed</span>`;
+              } else if (isCurrent) {
+                statusHtml = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-primary/15 text-primary border border-primary/30 flex items-center gap-1.5 justify-end animate-pulse"><span class="material-symbols-outlined text-[14px] animate-spin">sync</span>Transmitting...</span>`;
+              } else {
+                statusHtml = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold text-outline/60 justify-end">Queued</span>`;
+              }
+
+              return `
+                <tr class="hover:bg-white/[0.02] transition-colors ${isCurrent ? "bg-primary/5" : ""}">
+                  <td class="p-3 text-center font-bold text-outline">${idx + 1}</td>
+                  <td class="p-3 font-mono text-outline">${escapeHtml(t.date || "")}</td>
+                  <td class="p-3">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-extrabold ${t.deposit > 0 ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"}">
+                      ${t.deposit > 0 ? "Receipt" : "Payment"}
+                    </span>
+                  </td>
+                  <td class="p-3 max-w-xs truncate" title="${escapeHtml(t.narration || "")}">${escapeHtml(t.narration || "")}</td>
+                  <td class="p-3 font-bold text-primary">${escapeHtml(t.assigned_ledger || "Unassigned")}</td>
+                  <td class="p-3 text-right font-bold text-on-surface">₹ ${amt}</td>
+                  <td class="p-3 text-right">${statusHtml}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tier 4: Real-time Terminal Log Console -->
+    <div class="glass-pro p-6 rounded-[2rem] border border-outline-variant/30 space-y-3 shadow-sm">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase tracking-wider text-outline flex items-center gap-2">
+          <span class="material-symbols-outlined text-sm">terminal</span> Real-time Connector Execution Stream
+        </span>
+        <span class="text-[10px] font-mono text-outline/60">Tally XML Gateway :9000</span>
+      </div>
+      <div class="bg-slate-950 text-emerald-400 font-mono text-[11px] p-4 rounded-2xl h-44 overflow-y-auto space-y-1 border border-slate-800 shadow-inner">
+        ${(dp.logs || []).map((l) => `<div>${escapeHtml(l)}</div>`).join("")}
+        ${!dp.completed ? `<div class="text-slate-400 animate-pulse">⏳ Streaming vouchers through desktop connector...</div>` : ""}
+      </div>
+    </div>
+
+    <!-- Tier 5: Return to Bank Import Action -->
+    <div class="flex items-center justify-between pt-2">
+      <button 
+        class="px-5 py-2.5 rounded-xl border border-outline-variant/40 hover:bg-surface-container text-xs font-bold text-on-surface flex items-center gap-2 transition-all"
+        onclick="go('bank_import')">
+        <span class="material-symbols-outlined text-[18px]">arrow_back</span>
+        <span>Return to Bank Statement Import</span>
+      </button>
+
+      ${dp.completed ? `
+        <button 
+          class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-black shadow-lg shadow-primary/25 hover:brightness-110 flex items-center gap-2 transition-all"
+          onclick="go('bank_import')">
+          <span>Done</span>
+          <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+        </button>
+      ` : ""}
+    </div>
+  `
+  );
 }
