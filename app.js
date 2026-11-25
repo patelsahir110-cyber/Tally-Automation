@@ -5137,6 +5137,38 @@ function bankImportScreen() {
         </select>
       </div>
 
+      <!-- Quick Replace & Assign Ledger to All Filtered Records -->
+      <div class="p-3.5 bg-gradient-to-r from-primary/5 via-surface-container-low to-primary/5 border border-primary/20 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-sm">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+            <span class="material-symbols-outlined text-[20px]">swap_horiz</span>
+          </div>
+          <div>
+            <div class="text-xs font-black text-on-surface flex items-center gap-2">
+              <span>Quick Assign Ledger to All Filtered Rows</span>
+              ${(state.bankImportSearch || state.bankImportFilterType !== 'all' || state.bankImportFilterLedgerStatus !== 'all') ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary text-white">${visibleRows.length} Found</span>` : ''}
+            </div>
+            <div class="text-[11px] text-outline">Select any Tally ledger to assign, lock, and map across all filtered results in 1 click.</div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <select 
+            id="quick-filter-ledger-select"
+            class="bg-surface border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary min-w-[220px] shadow-sm">
+            <option value="">-- Select Ledger to Replace &amp; Assign --</option>
+            ${(state.masters?.ledgers || []).map((l) => `<option value="${escapeHtml(l.name)}">${escapeHtml(l.name)} (${escapeHtml(l.parent || "General")})</option>`).join("")}
+          </select>
+          <button 
+            type="button"
+            class="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:brightness-110 shadow-md shadow-primary/20 flex items-center gap-1.5 transition-all"
+            onclick="const sel = document.getElementById('quick-filter-ledger-select'); if(sel && sel.value) { applyQuickReplaceLedgerToFiltered(sel.value); } else { alert('Please choose a ledger from the dropdown first.'); }">
+            <span class="material-symbols-outlined text-[16px]">done_all</span>
+            <span>Assign to All Filtered</span>
+          </button>
+        </div>
+      </div>
+
       ${
         state.bankImportSelectedIds.length > 0
           ? `
@@ -8545,17 +8577,21 @@ function renderExpertSupportModal() {
 function renderDispatchProgressModal() {
   if (!state.dispatchProgress || !state.dispatchProgress.open) return "";
   const dp = state.dispatchProgress;
+  const percent = Math.min(100, Math.max(0, dp.percent || 0));
+  const remaining = Math.max(0, dp.total - (dp.succeeded || dp.sent || 0));
+
   return `
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div class="bg-white rounded-[2rem] border border-outline-variant/40 shadow-2xl max-w-xl w-full p-8 space-y-6 text-left" onclick="event.stopPropagation()">
+      <div class="bg-white rounded-[2rem] border border-outline-variant/40 shadow-2xl max-w-lg w-full p-8 space-y-6 text-left" onclick="event.stopPropagation()">
+        <!-- Header -->
         <div class="flex items-center justify-between pb-4 border-b border-outline-variant/20">
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl ${dp.completed ? "bg-emerald-500/10 text-emerald-600" : "bg-primary/10 text-primary"} flex items-center justify-center">
-              <span class="material-symbols-outlined text-[24px]">${dp.completed ? "task_alt" : "rocket_launch"}</span>
+            <div class="w-12 h-12 rounded-2xl ${dp.completed ? "bg-emerald-500/10 text-emerald-600" : "bg-primary/10 text-primary"} flex items-center justify-center shadow-sm">
+              <span class="material-symbols-outlined text-[28px]">${dp.completed ? "check_circle" : "send"}</span>
             </div>
             <div>
-              <h3 class="text-lg font-black text-on-surface">${dp.completed ? "Vouchers Dispatched Successfully" : "Dispatching Vouchers to TallyPrime"}</h3>
-              <p class="text-xs text-outline">${dp.completed ? "All transactions processed via Desktop Connector" : `Streaming ${dp.total} vouchers to Tally XML Gateway`}</p>
+              <h3 class="text-lg font-black text-on-surface">${dp.completed ? "Transfer Completed Successfully" : "Sending Vouchers to TallyPrime"}</h3>
+              <p class="text-xs text-outline">Connected to TallyPrime on Port 9000</p>
             </div>
           </div>
           ${dp.completed ? `
@@ -8565,43 +8601,54 @@ function renderDispatchProgressModal() {
           ` : ""}
         </div>
 
-        <!-- Live Step & Counter -->
-        <div class="space-y-2">
-          <div class="flex justify-between items-center text-xs font-bold">
-            <span class="text-primary font-mono">${dp.step}</span>
-            <span class="text-on-surface">${dp.percent}% (${dp.sent} / ${dp.total})</span>
-          </div>
-          <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden p-0.5 border border-outline-variant/20">
-            <div class="bg-gradient-to-r from-primary to-emerald-500 h-full rounded-full transition-all duration-300" style="width: ${dp.percent}%"></div>
-          </div>
-        </div>
-
-        <!-- Real-time Itemized Log -->
-        <div class="space-y-1.5">
-          <div class="text-[11px] font-bold uppercase tracking-wider text-outline">Sequential Dispatch Log</div>
-          <div class="bg-slate-950 text-emerald-400 font-mono text-[11px] p-4 rounded-xl h-44 overflow-y-auto space-y-1 border border-slate-800 shadow-inner">
-            ${dp.logs.map((log) => `<div>${escapeHtml(log)}</div>`).join("")}
-            ${!dp.completed ? `<div class="text-slate-400 animate-pulse">⏳ Dispatching next voucher in stream...</div>` : ""}
-          </div>
-        </div>
-
-        <!-- Final Summary -->
-        ${dp.completed ? `
-          <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs flex items-center justify-between text-emerald-800">
-            <span class="font-bold flex items-center gap-1.5">
-              <span class="material-symbols-outlined text-[18px]">verified</span>
-              ${dp.succeeded} Vouchers Imported, ${dp.failed} Failed
+        <!-- Single Unified Progress Bar: Percentage & Number of Sent Vouchers Simultaneously -->
+        <div class="p-5 rounded-2xl bg-surface-container-low border border-primary/20 space-y-3">
+          <div class="flex justify-between items-center text-xs font-black">
+            <span class="text-primary font-bold flex items-center gap-1.5">
+              ${!dp.completed ? `<span class="w-2 h-2 rounded-full bg-primary animate-ping"></span>` : ""}
+              <span>${dp.completed ? "All Vouchers Sent" : "Progress"}</span>
             </span>
-            <span class="font-bold text-[11px] uppercase tracking-wider">Day Book Refreshed</span>
+            <span class="text-on-surface font-mono text-sm">${dp.succeeded || dp.sent || 0} of ${dp.total} Sent (${percent}%)</span>
           </div>
-          <div class="flex justify-end pt-2">
-            <button class="px-6 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold uppercase tracking-wider shadow-md shadow-emerald-600/20 hover:brightness-110 flex items-center gap-1.5" onclick="closeDispatchModal()">
-              <span class="material-symbols-outlined text-sm">check</span>
-              Done
+
+          <!-- Large High-Visibility Bar -->
+          <div class="w-full bg-slate-200 h-5 rounded-full overflow-hidden p-0.5 border border-outline-variant/30 shadow-inner">
+            <div class="bg-gradient-to-r from-primary to-emerald-500 h-full rounded-full transition-all duration-300 shadow-md shadow-primary/30" style="width: ${percent}%"></div>
+          </div>
+
+          <div class="text-[11px] text-outline font-medium text-center">
+            ${dp.completed ? "Day Book entries verified and locked permanently in Tally." : "Transferring transactions sequentially into TallyPrime Day Book..."}
+          </div>
+        </div>
+
+        <!-- Clean Number Count Badges -->
+        <div class="grid grid-cols-3 gap-3 text-center">
+          <div class="p-3 rounded-xl bg-surface-container-low border border-outline-variant/20">
+            <div class="text-[10px] font-bold text-outline uppercase tracking-wider">Total</div>
+            <div class="text-xl font-black text-on-surface mt-0.5">${dp.total}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700">
+            <div class="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Sent</div>
+            <div class="text-xl font-black text-emerald-600 mt-0.5">${dp.succeeded || dp.sent || 0}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-700">
+            <div class="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Remaining</div>
+            <div class="text-xl font-black text-blue-600 mt-0.5">${remaining}</div>
+          </div>
+        </div>
+
+        <!-- Action / Done Button -->
+        ${dp.completed ? `
+          <div class="pt-2 flex justify-end">
+            <button 
+              class="w-full py-3 rounded-xl bg-emerald-600 text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-emerald-600/25 hover:brightness-110 flex items-center justify-center gap-2 transition-all"
+              onclick="closeDispatchModal()">
+              <span class="material-symbols-outlined text-[18px]">check</span>
+              <span>Done &amp; Return to Bank Statement</span>
             </button>
           </div>
         ` : `
-          <div class="text-center text-xs text-outline font-medium">Please keep Tally Automation Connector running on your desktop.</div>
+          <div class="text-center text-[11px] text-outline font-medium">Please keep Tally Automation Connector running on your desktop.</div>
         `}
       </div>
     </div>
@@ -8619,18 +8666,18 @@ function bankDispatchScreen() {
     succeeded: 0,
     failed: 0,
     percent: 0,
-    step: "No dispatch task active.",
-    logs: [],
+    step: "Dispatching...",
     completed: true
   };
 
   const percent = Math.min(100, Math.max(0, dp.percent || 0));
-  const remaining = Math.max(0, dp.total - dp.succeeded - dp.failed);
+  const sentCount = dp.succeeded || dp.sent || 0;
+  const remaining = Math.max(0, dp.total - sentCount);
 
   return tailwindShell(
     "bank_dispatch",
     `
-    <!-- Hero Header with Return Button -->
+    <!-- Header with Return Button -->
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
       <div class="flex items-center gap-4">
         <button 
@@ -8640,175 +8687,123 @@ function bankDispatchScreen() {
           <span>Back to Bank Import</span>
         </button>
         <div>
-          <h2 class="text-display-lg font-black text-primary leading-tight">Voucher Dispatch Stream</h2>
-          <p class="text-body-md text-outline/80">Real-time sequential voucher creation into TallyPrime (Port 9000).</p>
+          <h2 class="text-display-lg font-black text-primary leading-tight">Sending Vouchers to TallyPrime</h2>
+          <p class="text-body-md text-outline/80">Direct transfer into TallyPrime Day Book.</p>
         </div>
       </div>
 
       <div class="flex items-center gap-3">
         <div class="px-3.5 py-2 rounded-xl glass-pro border border-outline-variant/30 text-xs flex items-center gap-2">
           <span class="w-2 h-2 rounded-full ${isOnline ? "bg-emerald-500" : "bg-rose-500"} animate-pulse"></span>
-          <span class="font-bold text-on-surface">${isOnline ? "Connector Stream Active" : "Gateway Offline"}</span>
+          <span class="font-bold text-on-surface">${isOnline ? "Tally Connector Active" : "Gateway Offline"}</span>
           <span class="text-outline">(${escapeHtml(activeComp)})</span>
         </div>
       </div>
     </div>
 
-    <!-- Tier 1: Real-time Dispatch Metrics -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-      <div class="glass-pro p-5 rounded-2xl border border-outline-variant/20 shadow-sm">
-        <div class="text-[10px] font-bold text-outline uppercase tracking-wider">Total Selected</div>
-        <div class="text-3xl font-black text-on-surface mt-1">${dp.total}</div>
-        <div class="text-[10px] text-outline font-semibold mt-0.5">Vouchers in batch</div>
-      </div>
-
-      <div class="glass-pro p-5 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 shadow-sm">
-        <div class="text-[10px] font-bold text-emerald-600 uppercase tracking-wider flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>Imported in Tally
-        </div>
-        <div class="text-3xl font-black text-emerald-600 mt-1">${dp.succeeded}</div>
-        <div class="text-[10px] text-emerald-700/70 font-semibold mt-0.5">Permanent Day Book entries</div>
-      </div>
-
-      <div class="glass-pro p-5 rounded-2xl border border-blue-500/20 bg-blue-500/5 shadow-sm">
-        <div class="text-[10px] font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>Remaining in Stream
-        </div>
-        <div class="text-3xl font-black text-blue-500 mt-1">${remaining}</div>
-        <div class="text-[10px] text-outline font-semibold mt-0.5">Sequential queue</div>
-      </div>
-
-      <div class="glass-pro p-5 rounded-2xl border ${dp.failed > 0 ? "border-rose-500/20 bg-rose-500/5" : "border-outline-variant/20"} shadow-sm">
-        <div class="text-[10px] font-bold ${dp.failed > 0 ? "text-rose-500" : "text-outline"} uppercase tracking-wider flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full ${dp.failed > 0 ? "bg-rose-500" : "bg-outline/40"}"></span>Failed / Rejected
-        </div>
-        <div class="text-3xl font-black ${dp.failed > 0 ? "text-rose-500" : "text-on-surface"} mt-1">${dp.failed}</div>
-        <div class="text-[10px] text-outline font-semibold mt-0.5">${dp.failed > 0 ? "Check Tally line errors" : "Zero errors"}</div>
-      </div>
-    </div>
-
-    <!-- Tier 2: Large Hero Progress Bar -->
-    <div class="glass-pro p-8 rounded-[2rem] border border-primary/20 bg-gradient-to-br from-primary/5 via-surface to-surface shadow-md space-y-4">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div class="space-y-1">
-          <div class="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
-            ${dp.completed ? `<span class="material-symbols-outlined text-emerald-500 text-[18px]">verified</span> STREAM COMPLETED` : `<span class="w-2 h-2 rounded-full bg-primary animate-ping"></span> DISPATCH IN PROGRESS`}
-          </div>
-          <div class="text-base font-bold text-on-surface font-mono">${escapeHtml(dp.step)}</div>
+    <!-- Main Clean Progress Card: Single Unified Bar (Percentage & Count) -->
+    <div class="glass-pro p-8 rounded-[2rem] border border-primary/20 bg-gradient-to-br from-primary/5 via-surface to-surface shadow-md space-y-6 max-w-3xl mx-auto mt-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-outline-variant/20 pb-4">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+            ${dp.completed ? `<span class="material-symbols-outlined text-emerald-500 text-[18px]">verified</span> Completed` : `<span class="w-2 h-2 rounded-full bg-primary animate-ping"></span> In Progress`}
+          </span>
+          <h3 class="text-lg font-black text-on-surface mt-1">${dp.completed ? "All Vouchers Sent Successfully" : "Sending Transactions to TallyPrime"}</h3>
         </div>
         <div class="text-right">
-          <div class="text-4xl font-black text-primary">${percent}%</div>
-          <div class="text-xs font-bold text-outline">${dp.succeeded} of ${dp.total} Transferred</div>
+          <div class="text-3xl font-black text-primary font-mono">${sentCount} / ${dp.total}</div>
+          <div class="text-xs font-bold text-outline">${percent}% Completed</div>
         </div>
       </div>
 
-      <!-- Animated Progress Bar -->
-      <div class="w-full bg-surface-container-high h-4 rounded-full overflow-hidden p-0.5 border border-outline-variant/30 shadow-inner">
-        <div class="bg-gradient-to-r from-primary via-indigo-500 to-emerald-500 h-full rounded-full transition-all duration-300 shadow-md shadow-primary/30" style="width: ${percent}%"></div>
-      </div>
-    </div>
-
-    <!-- Tier 3: Itemized Vouchers Stream Table -->
-    <div class="glass-pro p-6 rounded-[2rem] border border-outline-variant/30 space-y-4 shadow-sm">
-      <div class="flex items-center justify-between">
-        <div>
-          <h3 class="text-base font-black text-on-surface">Dispatched Transactions in this Batch</h3>
-          <p class="text-xs text-outline">Itemized verification status for each selected bank transaction.</p>
+      <!-- Large Unified Progress Bar: Percentage and Number Simultaneous -->
+      <div class="space-y-2">
+        <div class="flex justify-between items-center text-xs font-bold text-outline">
+          <span>Progress: ${sentCount} of ${dp.total} Sent</span>
+          <span>${percent}%</span>
         </div>
-        ${dp.completed ? `
-          <button 
-            class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-black shadow-lg shadow-primary/25 hover:brightness-110 flex items-center gap-2 transition-all"
-            onclick="go('bank_import')">
-            <span class="material-symbols-outlined text-[18px]">check</span>
-            <span>Done &amp; Return to Bank Statement</span>
-          </button>
-        ` : ""}
+        <div class="w-full bg-surface-container-high h-6 rounded-full overflow-hidden p-0.5 border border-outline-variant/30 shadow-inner">
+          <div class="bg-gradient-to-r from-primary via-indigo-500 to-emerald-500 h-full rounded-full transition-all duration-300 shadow-md shadow-primary/30" style="width: ${percent}%"></div>
+        </div>
       </div>
 
-      <div class="overflow-x-auto rounded-2xl border border-outline-variant/20">
-        <table class="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr class="border-b border-outline-variant/20 bg-surface-container-low/60 text-outline uppercase font-label-caps text-[10px] tracking-wider">
-              <th class="p-3 text-center w-12">#</th>
-              <th class="p-3">Date</th>
-              <th class="p-3">Type</th>
-              <th class="p-3">Particulars (Narration)</th>
-              <th class="p-3">Assigned Ledger (Party)</th>
-              <th class="p-3 text-right">Amount</th>
-              <th class="p-3 text-right">Tally Status</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-outline-variant/10">
-            ${(dp.targetRows || []).map((t, idx) => {
-              const amt = t.deposit > 0 ? Number(t.deposit).toLocaleString("en-IN", { minimumFractionDigits: 2 }) : Number(t.withdrawal).toLocaleString("en-IN", { minimumFractionDigits: 2 });
-              const isSent = t.send_status === "sent";
-              const isFailed = t.send_status === "failed";
-              const isCurrent = !dp.completed && !isSent && !isFailed && idx === dp.currentIdx;
-
-              let statusHtml = "";
-              if (isSent) {
-                statusHtml = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 flex items-center gap-1.5 justify-end"><span class="material-symbols-outlined text-[14px]">check_circle</span>Completed</span>`;
-              } else if (isFailed) {
-                statusHtml = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-rose-500/15 text-rose-500 border border-rose-500/30 flex items-center gap-1.5 justify-end" title="${escapeHtml(t.send_error || "Rejected")}"><span class="material-symbols-outlined text-[14px]">error</span>Failed</span>`;
-              } else if (isCurrent) {
-                statusHtml = `<span class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-primary/15 text-primary border border-primary/30 flex items-center gap-1.5 justify-end animate-pulse"><span class="material-symbols-outlined text-[14px] animate-spin">sync</span>Transmitting...</span>`;
-              } else {
-                statusHtml = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold text-outline/60 justify-end">Queued</span>`;
-              }
-
-              return `
-                <tr class="hover:bg-white/[0.02] transition-colors ${isCurrent ? "bg-primary/5" : ""}">
-                  <td class="p-3 text-center font-bold text-outline">${idx + 1}</td>
-                  <td class="p-3 font-mono text-outline">${escapeHtml(t.date || "")}</td>
-                  <td class="p-3">
-                    <span class="px-2 py-0.5 rounded text-[10px] font-extrabold ${t.deposit > 0 ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"}">
-                      ${t.deposit > 0 ? "Receipt" : "Payment"}
-                    </span>
-                  </td>
-                  <td class="p-3 max-w-xs truncate" title="${escapeHtml(t.narration || "")}">${escapeHtml(t.narration || "")}</td>
-                  <td class="p-3 font-bold text-primary">${escapeHtml(t.assigned_ledger || "Unassigned")}</td>
-                  <td class="p-3 text-right font-bold text-on-surface">₹ ${amt}</td>
-                  <td class="p-3 text-right">${statusHtml}</td>
-                </tr>
-              `;
-            }).join("")}
-          </tbody>
-        </table>
+      <!-- Clean Metric Badges (Total, Sent, Remaining) -->
+      <div class="grid grid-cols-3 gap-4 text-center pt-2">
+        <div class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/20">
+          <div class="text-[10px] font-bold text-outline uppercase tracking-wider">Total Vouchers</div>
+          <div class="text-2xl font-black text-on-surface mt-1">${dp.total}</div>
+        </div>
+        <div class="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700">
+          <div class="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Successfully Sent</div>
+          <div class="text-2xl font-black text-emerald-600 mt-1">${sentCount}</div>
+        </div>
+        <div class="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-700">
+          <div class="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Remaining</div>
+          <div class="text-2xl font-black text-blue-600 mt-1">${remaining}</div>
+        </div>
       </div>
-    </div>
 
-    <!-- Tier 4: Real-time Terminal Log Console -->
-    <div class="glass-pro p-6 rounded-[2rem] border border-outline-variant/30 space-y-3 shadow-sm">
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-bold uppercase tracking-wider text-outline flex items-center gap-2">
-          <span class="material-symbols-outlined text-sm">terminal</span> Real-time Connector Execution Stream
-        </span>
-        <span class="text-[10px] font-mono text-outline/60">Tally XML Gateway :9000</span>
-      </div>
-      <div class="bg-slate-950 text-emerald-400 font-mono text-[11px] p-4 rounded-2xl h-44 overflow-y-auto space-y-1 border border-slate-800 shadow-inner">
-        ${(dp.logs || []).map((l) => `<div>${escapeHtml(l)}</div>`).join("")}
-        ${!dp.completed ? `<div class="text-slate-400 animate-pulse">⏳ Streaming vouchers through desktop connector...</div>` : ""}
-      </div>
-    </div>
-
-    <!-- Tier 5: Return to Bank Import Action -->
-    <div class="flex items-center justify-between pt-2">
-      <button 
-        class="px-5 py-2.5 rounded-xl border border-outline-variant/40 hover:bg-surface-container text-xs font-bold text-on-surface flex items-center gap-2 transition-all"
-        onclick="go('bank_import')">
-        <span class="material-symbols-outlined text-[18px]">arrow_back</span>
-        <span>Return to Bank Statement Import</span>
-      </button>
-
-      ${dp.completed ? `
+      <!-- Action Button -->
+      <div class="pt-4 flex justify-center">
         <button 
-          class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-black shadow-lg shadow-primary/25 hover:brightness-110 flex items-center gap-2 transition-all"
+          class="px-8 py-3 rounded-xl ${dp.completed ? "bg-emerald-600 shadow-emerald-600/25" : "bg-primary shadow-primary/25"} text-white font-bold text-xs uppercase tracking-wider shadow-lg hover:brightness-110 flex items-center gap-2 transition-all"
           onclick="go('bank_import')">
-          <span>Done</span>
-          <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+          <span class="material-symbols-outlined text-[18px]">${dp.completed ? "check" : "arrow_back"}</span>
+          <span>${dp.completed ? "Done & Return to Bank Statement" : "Return to Bank Statement"}</span>
         </button>
-      ` : ""}
+      </div>
     </div>
-  `
+    `
   );
+}
+
+async function applyQuickReplaceLedgerToFiltered() {
+  const selectElem = document.getElementById("quick-replace-ledger-select");
+  const ledgerName = (selectElem?.value || "").trim();
+  if (!ledgerName) {
+    alert("Please select a Tally ledger from the dropdown first.");
+    return;
+  }
+
+  // Find all filtered transactions that are not sent yet
+  const filtered = getFilteredBankTransactions();
+  const sendable = filtered.filter((t) => t.send_status !== "sent");
+  if (sendable.length === 0) {
+    setNotice("No unlocked or sendable transactions match the current filter to assign.");
+    return;
+  }
+
+  const targetIds = sendable.map((t) => t.id);
+  const pattern = (state.bankImportSearch || ledgerName).trim();
+
+  // Optimistically assign in memory and lock
+  for (const t of state.bankImportTransactions || []) {
+    if (targetIds.includes(t.id)) {
+      t.assigned_ledger = ledgerName;
+      t.is_locked = 1;
+    }
+  }
+
+  persistLastTask();
+  renderBankImportTableContainer();
+
+  try {
+    await api("/api/bank-statement/assign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        statementId: state.bankImportStatement ? state.bankImportStatement.id : null,
+        transactionIds: targetIds,
+        ledger: ledgerName,
+        lock: true,
+        createRule: Boolean(pattern),
+        rulePattern: pattern,
+        autoMatchAll: true
+      }),
+    });
+    setNotice(`✅ Successfully assigned "${ledgerName}" to all ${targetIds.length} filtered transaction(s)!`);
+    render();
+  } catch (err) {
+    setNotice("Assign error: " + err.message);
+  }
 }
