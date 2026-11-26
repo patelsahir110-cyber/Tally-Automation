@@ -8556,61 +8556,83 @@ function renderExpertSupportModal() {
   if (!state.showExpertSupportModal) return "";
   return `
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in" onclick="closeExpertSupportModal()">
-      <div class="bg-white rounded-[2rem] border border-outline-variant/40 shadow-2xl max-w-2xl w-full p-8 space-y-6 text-left" onclick="event.stopPropagation()">
-        <div class="flex items-center justify-between pb-4 border-b border-outline-variant/20">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-              <span class="material-symbols-outlined text-[24px]">support</span>
-            </div>
-            <div>
-              <h3 class="text-lg font-black text-on-surface">Universal Tally Automation Guide</h3>
-              <p class="text-xs text-outline">4-step automated pipeline from bank statement PDF to TallyPrime vouchers</p>
-            </div>
+      <div class="bg-white rounded-[2.5rem] border border-outline-variant/40 shadow-2xl max-w-4xl w-full p-6 sm:p-10 text-center relative overflow-hidden" onclick="event.stopPropagation()">
+        
+        <!-- Top Close Button -->
+        <button class="absolute right-6 top-6 w-9 h-9 rounded-full bg-surface-container-low hover:bg-surface-container flex items-center justify-center text-outline hover:text-on-surface transition-all cursor-pointer" onclick="closeExpertSupportModal()">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+
+        <!-- Header: Ultra Clear & Friendly -->
+        <div class="max-w-xl mx-auto space-y-2 mb-8 text-center">
+          <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-black uppercase tracking-wider">
+            <span class="w-2 h-2 rounded-full bg-primary"></span> SIMPLE 4-STEP PROCESS
           </div>
-          <button class="w-8 h-8 rounded-full hover:bg-surface-container-high flex items-center justify-center text-outline" onclick="closeExpertSupportModal()">
-            <span class="material-symbols-outlined text-sm">close</span>
+          <h2 class="text-2xl sm:text-3xl font-black text-on-surface tracking-tight">How It Works</h2>
+          <p class="text-sm text-outline font-medium">From bank statement to TallyPrime in under 1 minute. No accounting expertise required.</p>
+        </div>
+
+        <!-- 4 Visual Graphic Steps: Bold, Clear, Minimal Text -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
+
+          <!-- STEP 1 -->
+          <div class="p-6 rounded-3xl bg-blue-50/60 border-2 border-blue-100 hover:border-blue-400 hover:shadow-md transition-all flex flex-col items-center text-center group">
+            <div class="w-16 h-16 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/25 mb-4 group-hover:scale-110 transition-transform">
+              <span class="material-symbols-outlined text-[34px]">upload_file</span>
+            </div>
+            <span class="px-2.5 py-0.5 rounded-full bg-blue-200 text-blue-800 text-[10px] font-black uppercase tracking-wider mb-2">Step 1</span>
+            <h3 class="text-base font-black text-slate-900 mb-2">Upload Bank PDF</h3>
+            <p class="text-xs text-slate-600 leading-relaxed font-semibold">
+              Drop your bank statement file. All transactions load on your screen instantly.
+            </p>
+          </div>
+
+          <!-- STEP 2 -->
+          <div class="p-6 rounded-3xl bg-indigo-50/60 border-2 border-indigo-100 hover:border-indigo-400 hover:shadow-md transition-all flex flex-col items-center text-center group">
+            <div class="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/25 mb-4 group-hover:scale-110 transition-transform">
+              <span class="material-symbols-outlined text-[34px]">category</span>
+            </div>
+            <span class="px-2.5 py-0.5 rounded-full bg-indigo-200 text-indigo-800 text-[10px] font-black uppercase tracking-wider mb-2">Step 2</span>
+            <h3 class="text-base font-black text-slate-900 mb-2">Select Ledger</h3>
+            <p class="text-xs text-slate-600 leading-relaxed font-semibold">
+              Pick which Tally party or account it belongs to. 1 click sets all matching rows.
+            </p>
+          </div>
+
+          <!-- STEP 3 -->
+          <div class="p-6 rounded-3xl bg-emerald-50/60 border-2 border-emerald-100 hover:border-emerald-400 hover:shadow-md transition-all flex flex-col items-center text-center group">
+            <div class="w-16 h-16 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-600/25 mb-4 group-hover:scale-110 transition-transform">
+              <span class="material-symbols-outlined text-[34px]">desktop_windows</span>
+            </div>
+            <span class="px-2.5 py-0.5 rounded-full bg-emerald-200 text-emerald-800 text-[10px] font-black uppercase tracking-wider mb-2">Step 3</span>
+            <h3 class="text-base font-black text-slate-900 mb-2">Keep App Open</h3>
+            <p class="text-xs text-slate-600 leading-relaxed font-semibold">
+              Make sure Tally Connector is running on your PC with a green light.
+            </p>
+          </div>
+
+          <!-- STEP 4 -->
+          <div class="p-6 rounded-3xl bg-purple-50/60 border-2 border-purple-100 hover:border-purple-400 hover:shadow-md transition-all flex flex-col items-center text-center group">
+            <div class="w-16 h-16 rounded-2xl bg-purple-600 text-white flex items-center justify-center shadow-lg shadow-purple-600/25 mb-4 group-hover:scale-110 transition-transform">
+              <span class="material-symbols-outlined text-[34px]">send</span>
+            </div>
+            <span class="px-2.5 py-0.5 rounded-full bg-purple-200 text-purple-800 text-[10px] font-black uppercase tracking-wider mb-2">Step 4</span>
+            <h3 class="text-base font-black text-slate-900 mb-2">Click Send</h3>
+            <p class="text-xs text-slate-600 leading-relaxed font-semibold">
+              Click Send to Tally. Your vouchers are created directly in your Day Book!
+            </p>
+          </div>
+
+        </div>
+
+        <!-- Bottom Action Area -->
+        <div class="pt-2 flex flex-col sm:flex-row items-center justify-center gap-4">
+          <button class="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-primary hover:brightness-110 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-primary/25 flex items-center justify-center gap-2 transition-all cursor-pointer" onclick="closeExpertSupportModal()">
+            <span>Got It, Let's Start</span>
+            <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
           </button>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/30 space-y-2">
-            <div class="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-wider">
-              <span class="w-6 h-6 rounded-lg bg-primary text-white flex items-center justify-center text-xs">1</span>
-              <span>Upload Any Bank PDF</span>
-            </div>
-            <p class="text-xs text-outline leading-relaxed">Drop single or bulk bank statements. The universal coordinate parser extracts headers, dates, withdrawals, deposits, and balances without hardcoding any bank.</p>
-          </div>
-
-          <div class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/30 space-y-2">
-            <div class="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-wider">
-              <span class="w-6 h-6 rounded-lg bg-primary text-white flex items-center justify-center text-xs">2</span>
-              <span>Auto-Assign &amp; Propagate</span>
-            </div>
-            <p class="text-xs text-outline leading-relaxed">Highlight any party text in narration or click "+ Create Ledger". It creates the ledger directly in TallyPrime and automatically assigns and locks all matching rows.</p>
-          </div>
-
-          <div class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/30 space-y-2">
-            <div class="flex items-center gap-2 text-emerald-600 font-bold text-xs uppercase tracking-wider">
-              <span class="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-xs">3</span>
-              <span>Desktop Connector</span>
-            </div>
-            <p class="text-xs text-outline leading-relaxed">Launch Tally_Automation_Connector.exe on your Windows PC. It pairs with the web cloud via outbound task queue and talks to TallyPrime on port 9000 with zero UI freezes.</p>
-          </div>
-
-          <div class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/30 space-y-2">
-            <div class="flex items-center gap-2 text-emerald-600 font-bold text-xs uppercase tracking-wider">
-              <span class="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-xs">4</span>
-              <span>Sequential Dispatch</span>
-            </div>
-            <p class="text-xs text-outline leading-relaxed">Dispatch ready vouchers. Watch live progress (0% to 100%) and itemized logs as each voucher is verified and written to TallyPrime's Day Book.</p>
-          </div>
-        </div>
-
-        <div class="pt-4 border-t border-outline-variant/20 flex justify-end">
-          <button class="px-6 py-2.5 rounded-xl bg-primary text-white text-xs font-bold uppercase tracking-wider shadow-md shadow-primary/20 hover:brightness-110" onclick="closeExpertSupportModal()">
-            Got It
-          </button>
-        </div>
       </div>
     </div>
   `;
