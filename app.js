@@ -4882,6 +4882,43 @@ function bankHighlighterModal() {
   `;
 }
 
+
+function getAllTallyLedgers() {
+  const masterList = Array.isArray(state.masters?.masters)
+    ? state.masters.masters
+    : Array.isArray(state.masters)
+    ? state.masters
+    : [];
+
+  let ledgers = masterList.filter((m) => m && (m.type === "ledger" || m.type === "gst_ledger"));
+  if (ledgers.length === 0) {
+    ledgers = masterList.filter((m) => m && m.name && m.type !== "group" && m.type !== "stock_item" && m.type !== "voucher_type");
+  }
+
+  // Deduplicate by name
+  const seen = new Set();
+  const result = [];
+  for (const l of ledgers) {
+    if (l && l.name) {
+      const k = l.name.trim().toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        result.push(l);
+      }
+    }
+  }
+
+  return result.sort((a, b) => (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" }));
+}
+
+function updateQuickFilterCountBadge() {
+  const badge = document.getElementById("quick-filter-count-badge");
+  if (badge) {
+    const count = getFilteredBankTransactions().length;
+    badge.innerText = `${count} Records Found`;
+  }
+}
+
 function bankImportScreen() {
   const isOnline = Boolean(state.tally?.online);
   const activeComp = state.masters?.activeCompany || state.tally?.company || "Not Detected";
@@ -4924,6 +4961,8 @@ function bankImportScreen() {
   const failedCount = allTxns.filter((t) => t.send_status === "failed").length;
 
   const allLedgers = (state.masters?.masters || []).filter((m) => m.type === "ledger" || m.type === "gst_ledger");
+  const availableTallyLedgers = getAllTallyLedgers();
+  const filteredTxns = getFilteredBankTransactions();
 
   return tailwindShell(
     "bank_import",
@@ -5113,14 +5152,14 @@ function bankImportScreen() {
             class="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant/40 bg-surface-container-low text-xs text-on-surface focus:ring-1 focus:ring-primary shadow-inner"
             placeholder="Search Narration (e.g. UPI, SHINE HAIR, NEFT, CASH)..."
             value="${escapeHtml(state.bankImportSearch || "")}"
-            oninput="state.bankImportSearch = this.value; renderBankImportTableContainer();"
+            oninput="state.bankImportSearch = this.value; renderBankImportTableContainer(); updateQuickFilterCountBadge();"
           />
         </div>
 
         <!-- Type Filter -->
         <select 
           class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary"
-          onchange="state.bankImportFilterType = this.value; renderBankImportTableContainer();">
+          onchange="state.bankImportFilterType = this.value; renderBankImportTableContainer(); updateQuickFilterCountBadge();">
           <option value="all" ${state.bankImportFilterType === "all" ? "selected" : ""}>All Types (Deposits & Withdrawals)</option>
           <option value="deposit" ${state.bankImportFilterType === "deposit" ? "selected" : ""}>Deposits Only (+)</option>
           <option value="withdrawal" ${state.bankImportFilterType === "withdrawal" ? "selected" : ""}>Withdrawals Only (-)</option>
@@ -5129,7 +5168,7 @@ function bankImportScreen() {
         <!-- Status Filter -->
         <select 
           class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary"
-          onchange="state.bankImportFilterLedgerStatus = this.value; renderBankImportTableContainer();">
+          onchange="state.bankImportFilterLedgerStatus = this.value; renderBankImportTableContainer(); updateQuickFilterCountBadge();">
           <option value="all" ${state.bankImportFilterLedgerStatus === "all" ? "selected" : ""}>All Ledger States</option>
           <option value="unassigned" ${state.bankImportFilterLedgerStatus === "unassigned" ? "selected" : ""}>Unassigned Only</option>
           <option value="assigned" ${state.bankImportFilterLedgerStatus === "assigned" ? "selected" : ""}>Assigned (Unlocked)</option>
@@ -5138,33 +5177,36 @@ function bankImportScreen() {
       </div>
 
       <!-- Quick Replace & Assign Ledger to All Filtered Records -->
-      <div class="p-3.5 bg-gradient-to-r from-primary/5 via-surface-container-low to-primary/5 border border-primary/20 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-sm">
-        <div class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-            <span class="material-symbols-outlined text-[20px]">swap_horiz</span>
+      <div class="p-4 bg-gradient-to-r from-primary/10 via-surface-container-low to-primary/10 border border-primary/30 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-sm">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center shadow-sm">
+            <span class="material-symbols-outlined text-[24px]">published_with_changes</span>
           </div>
           <div>
             <div class="text-xs font-black text-on-surface flex items-center gap-2">
-              <span>Quick Assign Ledger to All Filtered Rows</span>
-              ${(state.bankImportSearch || state.bankImportFilterType !== 'all' || state.bankImportFilterLedgerStatus !== 'all') ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary text-white">${visibleRows.length} Found</span>` : ''}
+              <span>Quick Replace &amp; Assign Ledger (All Filtered Records)</span>
+              <span id="quick-filter-count-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-primary text-white shadow-sm">
+                ${filteredTxns.length} Records Found
+              </span>
             </div>
-            <div class="text-[11px] text-outline">Select any Tally ledger to assign, lock, and map across all filtered results in 1 click.</div>
+            <div class="text-[11px] text-outline font-medium">Select any Tally Prime ledger to assign and lock across all filtered transactions in 1 click (no manual row selection required).</div>
           </div>
         </div>
 
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2.5 flex-wrap">
           <select 
-            id="quick-filter-ledger-select"
-            class="bg-surface border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:ring-1 focus:ring-primary min-w-[220px] shadow-sm">
-            <option value="">-- Select Ledger to Replace &amp; Assign --</option>
-            ${(state.masters?.ledgers || []).map((l) => `<option value="${escapeHtml(l.name)}">${escapeHtml(l.name)} (${escapeHtml(l.parent || "General")})</option>`).join("")}
+            id="quick-replace-ledger-select"
+            class="bg-surface border border-primary/40 rounded-xl px-3.5 py-2 text-xs font-bold text-on-surface focus:ring-2 focus:ring-primary min-w-[260px] shadow-sm cursor-pointer">
+            <option value="">-- Select Tally Ledger to Replace &amp; Assign --</option>
+            ${availableTallyLedgers.map((l) => `<option value="${escapeHtml(l.name)}">${escapeHtml(l.name)}${l.parent ? ` (${escapeHtml(l.parent)})` : ""}</option>`).join("")}
           </select>
+
           <button 
             type="button"
-            class="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs hover:brightness-110 shadow-md shadow-primary/20 flex items-center gap-1.5 transition-all"
-            onclick="const sel = document.getElementById('quick-filter-ledger-select'); if(sel && sel.value) { applyQuickReplaceLedgerToFiltered(sel.value); } else { alert('Please choose a ledger from the dropdown first.'); }">
-            <span class="material-symbols-outlined text-[16px]">done_all</span>
-            <span>Assign to All Filtered</span>
+            class="px-5 py-2.5 rounded-xl bg-primary text-white font-black text-xs hover:brightness-110 shadow-md shadow-primary/25 flex items-center gap-2 transition-all cursor-pointer active:scale-95"
+            onclick="applyQuickReplaceLedgerToFiltered()">
+            <span class="material-symbols-outlined text-[18px]">done_all</span>
+            <span>Apply to All Filtered Records</span>
           </button>
         </div>
       </div>
@@ -8757,26 +8799,35 @@ function bankDispatchScreen() {
   );
 }
 
-async function applyQuickReplaceLedgerToFiltered() {
-  const selectElem = document.getElementById("quick-replace-ledger-select");
-  const ledgerName = (selectElem?.value || "").trim();
+async function applyQuickReplaceLedgerToFiltered(ledgerArg) {
+  let ledgerName = (ledgerArg || "").trim();
   if (!ledgerName) {
-    alert("Please select a Tally ledger from the dropdown first.");
+    const selectElem = document.getElementById("quick-replace-ledger-select") || document.getElementById("quick-filter-ledger-select");
+    ledgerName = (selectElem?.value || "").trim();
+  }
+  if (!ledgerName) {
+    alert("Please select a Tally Prime ledger from the dropdown first.");
     return;
   }
 
-  // Find all filtered transactions that are not sent yet
+  // Find all filtered transactions matching current search & filters (regardless of row checkboxes)
   const filtered = getFilteredBankTransactions();
+  if (filtered.length === 0) {
+    alert("No transactions match the current filter or search.");
+    return;
+  }
+
+  // Only assign to transactions that haven't already been completed/sent to Tally
   const sendable = filtered.filter((t) => t.send_status !== "sent");
   if (sendable.length === 0) {
-    setNotice("No unlocked or sendable transactions match the current filter to assign.");
+    alert("All transactions matching the current filter have already been completed and sent to Tally.");
     return;
   }
 
   const targetIds = sendable.map((t) => t.id);
-  const pattern = (state.bankImportSearch || ledgerName).trim();
+  const pattern = (state.bankImportSearch || "").trim();
 
-  // Optimistically assign in memory and lock
+  // Optimistically assign in memory, lock them, and mark as Ready
   for (const t of state.bankImportTransactions || []) {
     if (targetIds.includes(t.id)) {
       t.assigned_ledger = ledgerName;
@@ -8785,10 +8836,12 @@ async function applyQuickReplaceLedgerToFiltered() {
   }
 
   persistLastTask();
-  renderBankImportTableContainer();
+
+  setNotice(`⏳ Assigning & locking "${ledgerName}" for ${targetIds.length} transaction(s)...`);
+  render();
 
   try {
-    await api("/api/bank-statement/assign", {
+    const res = await api("/api/bank-statement/assign", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -8801,9 +8854,10 @@ async function applyQuickReplaceLedgerToFiltered() {
         autoMatchAll: true
       }),
     });
-    setNotice(`✅ Successfully assigned "${ledgerName}" to all ${targetIds.length} filtered transaction(s)!`);
+    setNotice(`✅ Successfully assigned & locked "${ledgerName}" for all ${targetIds.length} filtered transaction(s)!`);
     render();
   } catch (err) {
     setNotice("Assign error: " + err.message);
+    render();
   }
 }
